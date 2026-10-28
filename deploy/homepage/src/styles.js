@@ -227,6 +227,33 @@ details[open]>.hx-season-head::before{content:'▾'}
 .hx-ep-foot{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 0 0;position:sticky;bottom:0;background:#111113;border-top:1px solid #232327;margin-top:8px}
 .hx-check{display:inline-flex;align-items:center;gap:6px;color:#c9ccd1;font:12px system-ui;cursor:pointer}
 .hx-check input{accent-color:#3b82f6;width:15px;height:15px;margin:0}
+.hx-filters-btn[hidden]{display:none!important}
+.hx-filters-btn[data-count]:not([data-count="0"]){border-color:#60a5fa;background:rgba(96,165,250,.12);color:#fff}
+.hx-shell-filters{width:min(620px,calc(100vw - 32px));height:auto;max-height:86vh;max-height:86dvh;min-height:0}
+.hx-filter-group{margin-bottom:14px}
+.hx-filter-label{display:block;color:#c9ccd1;font:600 12px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin-bottom:6px}
+.hx-filter-chips{display:flex;flex-wrap:wrap;gap:6px}
+.hx-filter-status-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.hx-filter-status-head .hx-filter-label{margin-bottom:0}
+.hx-filter-status-actions{display:flex;gap:6px}
+.hx-filter-status-actions .hx-btn{min-height:28px;padding:4px 8px;font-size:11px}
+.hx-filter-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 14px;max-height:260px;overflow:auto;padding-right:4px}
+.hx-filter-actions{display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #232327}
+.hx-filter-actions .hx-btn:first-child{margin-right:auto}
+.hx-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px;margin:14px 0 4px}
+.hx-pager[hidden]{display:none!important}
+.hx-page{appearance:none;cursor:pointer;border:1px solid #2f2f35;background:#17171a;color:#c9ccd1;border-radius:8px;min-width:34px;min-height:34px;padding:6px 10px;font:12px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.hx-page:hover{background:#202024}
+.hx-page[aria-current="page"]{background:#1f6feb;border-color:#1f6feb;color:#fff}
+.hx-page:disabled{opacity:.45;cursor:default}
+.hx-page:focus-visible{outline:2px solid #3b82f6;outline-offset:1px}
+.hx-page-info{color:#9aa0a6;font:12px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0 6px}
+@media(max-width:700px){
+  .hx-shell-filters{left:0;top:0;transform:none;width:100vw;height:100vh;height:100dvh;max-height:none;border-radius:0;border:0}
+  .hx-filter-grid{grid-template-columns:1fr;max-height:none}
+  .hx-filter-actions{position:sticky;bottom:0;background:#111113}
+  .hx-page-info{flex:1 1 100%;text-align:center;order:3;margin:4px 0 0}
+}
 .hx-help{border:1px solid #26262b;background:#151518;border-radius:10px;padding:9px 12px;margin-bottom:10px;color:#c9ccd1;font:12px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 .hx-help summary{cursor:pointer;color:#e5e7eb;font-weight:600;outline:none}
 .hx-help summary:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;border-radius:4px}

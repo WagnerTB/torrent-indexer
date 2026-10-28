@@ -10,6 +10,7 @@ Raspberry Pi é um **artefato de build**; não edite o `custom.js` do Pi à mão
 - `src/subs.js` — aba Legendas.
 - `src/orders/index.js` — controlador de Pedidos.
 - `src/orders/active.js` — Ativos e episódios pedidos.
+- `src/orders/filters.js` — modal de filtros (tipo/perfil/status) e paginação.
 - `src/orders/history.js` — Histórico.
 - `src/orders/episodes.js` — modal de episódios.
 - `src/orders/add-series.js` — busca e inclusão de séries.

@@ -9,14 +9,8 @@ export function createEpisodes(ctx) {
     const q = norm(state.query);
     return state.episodeItems.filter((item) => {
       if (q && !norm(historyLabel(item)).includes(q)) return false;
-      const s = statusOf(item);
-      if (state.filter === 'all' || state.filter === 'episodes') return true;
-      if (state.filter === 'active') return s === 'downloading' || s === 'queued' || s === 'searching' || s === 'requested' || s === 'request_pending' || s === 'request_approved';
-      if (state.filter === 'seerr') return s === 'request_pending' || s === 'request_approved' || s === 'request_completed';
-      if (state.filter === 'attention') return s === 'error' || s === 'request_declined' || s === 'request_failed';
-      if (state.filter === 'done') return s === 'downloaded' || s === 'partial' || s === 'request_completed';
-      if (state.filter === 'missing') return s === 'missing';
-      return false;
+      if (ctx.filters && !ctx.filters.matches(item)) return false;
+      return true;
     });
   }
 

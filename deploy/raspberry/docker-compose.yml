@@ -39,6 +39,14 @@ services:
       - redis
       - meilisearch
       - solvearr
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:7006/search/health || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      - autoheal=true
     mem_limit: 256m
     logging: *default-logging
     networks: [media]
@@ -49,6 +57,14 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    labels:
+      - autoheal=true
     mem_limit: 192m
     logging: *default-logging
     networks: [media]
@@ -62,6 +78,14 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in .env}
     volumes:
       - meili-data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:7700/health >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      - autoheal=true
     mem_limit: 512m
     logging: *default-logging
     networks: [media]
@@ -74,6 +98,14 @@ services:
       LOG_LEVEL: info
       CAPTCHA_SOLVER: none
     shm_size: 1gb
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8191/health >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
     mem_limit: 1024m
     logging: *default-logging
     networks: [media]
@@ -89,6 +121,14 @@ services:
     volumes:
       - ${CONFIG_ROOT}/qbittorrent:/config
       - ${MEDIA_ROOT}:/media
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8082/ >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
     ports:
       - "${LAN_IP}:8082:8082"
       - "6881:6881"
@@ -109,6 +149,14 @@ services:
       - ${MEDIA_ROOT}:/media
     ports:
       - "${LAN_IP}:8989:8989"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8989/ping >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    labels:
+      - autoheal=true
     mem_limit: 512m
     logging: *default-logging
     networks: [media]
@@ -124,6 +172,14 @@ services:
       - ${CONFIG_ROOT}/prowlarr:/config
     ports:
       - "${LAN_IP}:9696:9696"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9696/ping >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
     mem_limit: 384m
     logging: *default-logging
     networks: [media]
@@ -140,6 +196,14 @@ services:
       - ${MEDIA_ROOT}:/media
     ports:
       - "${LAN_IP}:6767:6767"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:6767/ >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
     mem_limit: 384m
     logging: *default-logging
     networks: [media]
@@ -157,6 +221,14 @@ services:
       - ${MEDIA_ROOT}:/media
     ports:
       - "8096:8096"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --noproxy '*' -fsS http://127.0.0.1:8096/health >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    labels:
+      - autoheal=true
     mem_limit: 1536m
     logging: *default-logging
     networks: [media]
@@ -188,6 +260,14 @@ services:
       - ${CONFIG_ROOT}/homepage:/app/config
     ports:
       - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider -Y off http://127.0.0.1:3000/api/healthcheck || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      - autoheal=true
     mem_limit: 384m
     logging: *default-logging
     networks: [media]
@@ -210,6 +290,14 @@ services:
     volumes:
       - ${CONFIG_ROOT}/gaming-agent:/app:ro
     command: ["python3", "/app/agent.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8098/gaming/status || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      - autoheal=true
     mem_limit: 64m
     logging: *default-logging
 
@@ -234,13 +322,27 @@ services:
       SONARR_DUBBED_PROFILE: "9"
       RADARR_ORIGINAL_PROFILE: "7"
       SONARR_ORIGINAL_PROFILE: "7"
+      STATE_DIR: /state
+      OS_API_KEY: ${OS_API_KEY:-}
+      STORAGE_CONFIG: '[{"id":"ssd01","label":"SSD 01","kind":"SSD","parts":[{"label":"Mídia","path":"/host/pimedia-probe"},{"label":"Docker","path":"/"}]},{"id":"system","label":"Sistema","kind":"microSD","parts":[{"label":"Sistema","path":"/host/root-probe"}]}]'
     volumes:
       - ${CONFIG_ROOT}/media-agent:/app:ro
+      - ${CONFIG_ROOT}/media-agent/state:/state
+      - ${CONFIG_ROOT}/media-agent/.storage-probe:/host/pimedia-probe:ro
+      - /etc/hostname:/host/root-probe:ro
       - ${CONFIG_ROOT}/bazarr/config/config.yaml:/bazarr/config.yaml:ro
       - ${CONFIG_ROOT}/radarr/config.xml:/radarr/config.xml:ro
       - ${CONFIG_ROOT}/sonarr2/config.xml:/sonarr/config.xml:ro
       - ${CONFIG_ROOT}/seerr:/seerr:ro
     command: ["python3", "/app/media_agent.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; socket.create_connection(('127.0.0.1',8097),3).close()\" || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
     mem_limit: 96m
     logging: *default-logging
 
@@ -260,6 +362,14 @@ services:
       - ${CONFIG_ROOT}/radarr:/radarr:ro
       - ${CONFIG_ROOT}/prowlarr/config.xml:/prowlarr/config.xml:ro
     command: ["python3", "/app/gateway.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; socket.create_connection(('127.0.0.1',8099),3).close()\" || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
     mem_limit: 128m
     logging: *default-logging
     networks: [media]
@@ -276,6 +386,14 @@ services:
       - ${MEDIA_ROOT}:/media
     ports:
       - "${LAN_IP}:7878:7878"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:7878/ping >/dev/null || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    labels:
+      - autoheal=true
     mem_limit: 384m
     logging: *default-logging
     networks: [media]
@@ -294,11 +412,13 @@ services:
     ports:
       - "5055:5055"
     healthcheck:
-      test: wget --no-verbose --tries=1 --spider http://localhost:5055/api/v1/settings/public || exit 1
-      start_period: 20s
-      timeout: 3s
-      interval: 15s
-      retries: 3
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:5055/api/v1/settings/public || exit 1"]
+      start_period: 120s
+      timeout: 5s
+      interval: 20s
+      retries: 5
+    labels:
+      - autoheal=true
     security_opt:
       - no-new-privileges
     cap_drop:
@@ -306,10 +426,28 @@ services:
     mem_limit: 384m
     logging: *default-logging
     networks: [media]
+
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "30"
+      AUTOHEAL_START_PERIOD: "120"
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "30"
+      DOCKER_SOCK: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    security_opt:
+      - no-new-privileges
+    mem_limit: 32m
+    logging: *default-logging
+    networks: [media]
+
 volumes:
   redis-data:
   meili-data:
-
 networks:
   media:
 

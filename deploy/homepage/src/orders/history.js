@@ -9,15 +9,9 @@ export function createHistory(ctx) {
     return state.historyItems.filter((item) => {
       if (q && !norm(historyLabel(item)).includes(q)) return false;
       if (state.originFilter !== 'all' && item.source !== state.originFilter) return false;
-      const s = statusOf(item);
-      if (state.filter === 'all') return true;
+      if (!ctx.filters.matches(item)) return false;
       if (state.filter === 'archived') return item.hidden;
       if (state.filter === 'episodes') return item.kind === 'episode';
-      if (state.filter === 'active') return s === 'downloading' || s === 'queued' || s === 'searching' || s === 'requested' || s === 'request_pending' || s === 'request_approved';
-      if (state.filter === 'seerr') return s === 'request_pending' || s === 'request_approved' || s === 'request_completed';
-      if (state.filter === 'attention') return s === 'error' || s === 'request_declined' || s === 'request_failed';
-      if (state.filter === 'done') return s === 'downloaded' || s === 'partial' || s === 'request_completed';
-      if (state.filter === 'missing') return s === 'missing';
       return true;
     });
   }
@@ -63,6 +57,7 @@ export function createHistory(ctx) {
     chip.append(dot, h('span', '', label), h('b', '', String(count)));
     chip.addEventListener('click', () => {
       state.filter = state.filter === key ? 'all' : key;
+      state.statusFilter = [];
       dom.filterSelect.value = state.filter;
       helpers.renderCurrent();
     });

@@ -48,6 +48,7 @@ Compose: `<STACK_ROOT>/docker-compose.yml` (projeto Compose
 | `media-gateway` | `python:3.12-alpine` (script local) | interna (`8099`, rede `media`) | `<MEDIA_ROOT>/docker/media-gateway` |
 | `radarr` | `lscr.io/linuxserver/radarr` | `<LAN_IP>:7878` | `<MEDIA_ROOT>/docker/radarr` |
 | `seerr` | `seerr/seerr` (sucessor do Jellyseerr) | `5055` (remoto) | `<MEDIA_ROOT>/docker/seerr` |
+| `autoheal` | `willfarrell/autoheal` | interna | reinicia containers marcados com `autoheal=true` quando ficam unhealthy |
 
 Acesso: **8096 (Jellyfin), 5055 (Seerr), 8080 (indexer/UI), 3000 (Homepage),
 11470/12470 (Stremio), 8098 (gaming: status/WOL com senha) e 8097
@@ -60,7 +61,13 @@ abas Pedidos/Legendas via media-agent.
 Limites de memória usados: Jellyfin 1536 MB; solvearr/FlareSolverr 1024 MB;
 Sonarr/qBittorrent/Meilisearch 512 MB; Prowlarr/Bazarr/Radarr/Seerr/Homepage
 384 MB; indexer/Stremio 256 MB; media-gateway 128 MB; Redis 192 MB;
-gaming-agent 64 MB; media-agent 96 MB.
+gaming-agent 64 MB; media-agent 96 MB; autoheal 32 MB.
+
+O host também usa o watchdog de hardware do Pi (`/dev/watchdog0`, BCM2835,
+timeout de 15 s) via `RuntimeWatchdogSec=15s` do systemd. O `autoheal` cobre
+containers unhealthy; o watchdog cobre travamento total do sistema. Instalação:
+`sudo sh deploy/raspberry/setup-watchdog.sh` (ver
+[RASPBERRY_PI.md](RASPBERRY_PI.md#watchdog-de-hardware)).
 
 ## 2. Armazenamento e caminhos
 
@@ -434,11 +441,16 @@ Bazarr em `http://<LAN_IP>:6767`, config
     tem rotas `/pedidos` e `/legendas` — elas retornam 404 —, por isso não são
     usados caminhos reais sem um proxy na frente;
   - bloco recolhível **Como funciona** em Pedidos e Legendas;
-  - aba **Pedidos** (perfis dublados + Seerr): contadores por status, filtros
-    contextuais (o select muda entre Ativos e Histórico), busca por título e
-    **Abrir Seerr**. Cada filme/série mostra status, progresso, tempo restante
-    e último evento. Pedidos do Seerr que ainda não chegaram ao Radarr/Sonarr
-    aparecem com o status/perfil do Seerr; recusados/falhos mostram o erro.
+  - aba **Pedidos** (todos os perfis do Radarr/Sonarr + Seerr): contadores por
+    status, filtros contextuais (o select muda entre Ativos e Histórico), busca
+    por título, botão **Filtros (N)** com modal central para tipo
+    (Filme/Série/Anime), perfil e status, disponível em **Ativos e Histórico**
+    (no Histórico vale para os registros já carregados), e **Abrir Seerr**. A
+    lista de Ativos mostra 10 itens por página, do mais recente ao mais antigo,
+    com navegação por páginas. Cada filme/série mostra status, perfil,
+    progresso, tempo restante e último evento. Pedidos do Seerr que ainda não
+    chegaram ao Radarr/Sonarr aparecem com o status/perfil do Seerr;
+    recusados/falhos mostram o erro.
     O botão **Adicionar série/anime** busca no Sonarr/TVDB, mostra se a série
     já existe e permite escolher **Perfil**, **Pasta raiz** e **Tipo**: ao
     adicionar, nada é monitorado, e o modal de episódios permite escolher o que
@@ -521,16 +533,19 @@ Bazarr em `http://<LAN_IP>:6767`, config
   (`LISTEN_HOST=0.0.0.0`). O `ALLOWED_NETWORKS` aceita LAN
   (`<LAN_SUBNET>`), Tailscale (`<TAILSCALE_RANGE>` e `<TAILSCALE_IPV6_RANGE>`) e
   loopback; fora disso retorna 403.
-- Script: `<MEDIA_ROOT>/docker/media-agent/media_agent.py` (fora do Git; o
-  `deploy/raspberry/docker-compose.yml` espera esse arquivo em
-  `${CONFIG_ROOT}/media-agent`); monta o
+- Script: `<MEDIA_ROOT>/docker/media-agent/media_agent.py`; a cópia versionada
+  fica em `deploy/raspberry/media-agent/media_agent.py` e é copiada para
+  `${CONFIG_ROOT}/media-agent` no deploy. Ele monta o
   `config.yaml` do Bazarr, os `config.xml` de Radarr/Sonarr, o config do Seerr
   (`/seerr/settings.json`) e a chave `<MEDIA_ROOT>/docker/media-agent/.bazarr_key`
-  (`BAZARR_KEY_FILE`). As API keys nunca vão para o navegador.
+  (`BAZARR_KEY_FILE`). A `OS_API_KEY` (OpenSubtitles) vem do `.env`
+  (`OS_API_KEY`) e não fica no `media_agent.py`. As API keys nunca vão para o
+  navegador.
 - Endpoints:
   - `GET /subs/quota`: quota real da OpenSubtitles (seção 8.1).
-  - `GET /arr/pending`: filmes no perfil `Animação - Dublado` (8) e séries no
-    `Séries - Dublado` (9), com `hasFile`.
+  - `GET /arr/pending`: todos os filmes e séries do Radarr/Sonarr (qualquer
+    perfil), com `hasFile`, `profileId`, `profileName`, `seriesType` e
+    `addedAt`. O frontend filtra por tipo/perfil/status e pagina de 10 em 10.
   - `GET /arr/pending?status=1`: mesma lista enriquecida com `status`
     (`downloaded`, `partial`, `downloading`, `queued`, `searching`, `error`,
     `missing`, `request_pending`, `request_approved`, `request_declined`,
@@ -538,7 +553,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
     evento do histórico e comando de busca ativo. Consulta `/api/v3/queue`,
     `/api/v3/history` e `/api/v3/command` em paralelo e cruza com
     `/api/v1/request` do Seerr por TMDB (filmes) ou TVDB (séries). Pedidos do
-    Seerr sem item correspondente nos perfis dublados entram como itens
+    Seerr sem item correspondente no Radarr/Sonarr entram como itens
     somente-Seerr; `seerrError` é preenchido se o Seerr estiver indisponível,
     sem derrubar a lista do *arr.
   - `POST /arr/check` `{"kind":"movie|series","id":N}`: consulta
@@ -782,8 +797,9 @@ curl -s -H "X-API-KEY: <BAZARR_API_KEY>" \
   154 releases, 0 aceitos. O release PT-BR do Rede Torrent apareceu depois com
   11 seeders, mas o Radarr não o casa pelo título em inglês; o arquivo espanhol
   permanece.
-- Homepage: painel **Pedidos** (perfis dublados) com proxy no media-agent;
-  lista pendências, mostra a contagem no botão, verifica releases aceitos e
+- Homepage: painel **Pedidos** (todos os perfis + Seerr) com proxy no
+  media-agent; lista pendências, mostra a contagem no botão, tem filtros por
+  tipo/perfil/status com paginação de 10 itens, verifica releases aceitos e
   troca para Original + busca. Teste do Jack: `Nenhum PT-BR aceito (154
   release(s) analisados)` com o botão **Buscar original**.
 - FlareSolverr: `solvearr` trocado para a imagem oficial 3.5.0, 1024 MB,

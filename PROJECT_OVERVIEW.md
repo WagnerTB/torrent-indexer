@@ -346,9 +346,10 @@ com `&` e `%20`.
 - Perfis dublados (Radarr `Animação - Dublado` e Sonarr `Séries - Dublado`)
   exigem PT-BR desde 2026-10-26 (mínimo 100) e rejeitam `Latino/Espanhol`.
   O Homepage tem abas no topo **Início**, **Pedidos** e **Legendas**; a aba
-  Pedidos cruza os perfis dublados com os pedidos do Seerr (pendente,
-  aprovado, recusado ou falhou), verifica releases PT-BR e permite trocar para
-  o perfil Original e buscar quando não houver. Também busca séries/animes no
+  Pedidos cruza todos os perfis do Radarr/Sonarr com os pedidos do Seerr
+  (pendente, aprovado, recusado ou falhou), tem filtros por tipo/perfil/status
+  em Ativos e Histórico, paginação de 10 itens em Ativos, verifica releases
+  PT-BR e permite trocar para o perfil Original e buscar quando não houver. Também busca séries/animes no
   Sonarr, adiciona com o perfil escolhido sem monitorar tudo e permite marcar e
   buscar episódios específicos. O `custom.js` é buildado a partir de
   `deploy/homepage/src` (ver [deploy/homepage/README.md](deploy/homepage/README.md)).
@@ -388,12 +389,13 @@ Arquivos importantes alterados/adicionados nesta etapa:
 - `UI_AUDIT.md` e `SECURITY_AUDIT.md` — plano/status da UI e auditoria de
   segurança.
 
-No Pi, também foram atualizados (fora do Git): `gaming-agent/agent.py` (só
-WOL/status, 8099 privada/8098 pública), `media-agent/media_agent.py` (Pedidos e
-Legendas: `/arr/*`, `/sonarr/*`, `/bazarr`, quota, porta 8097),
-`media-gateway/gateway.py` (proxy Torznab), `.bazarr_key`, `GAMING_PASSWORD` no
-`.env` e o `custom.js` do Homepage (modo local/remoto, sem segredos). O fonte do
-`custom.js` está em `deploy/homepage/src` e o artefato é gerado com esbuild.
+No Pi, também foram atualizados: `gaming-agent/agent.py` (fora do Git; só
+WOL/status, 8099 privada/8098 pública), `media-agent/media_agent.py` (versionado
+em `deploy/raspberry/media-agent/`; Pedidos e Legendas: `/arr/*`, `/sonarr/*`,
+`/bazarr`, quota, porta 8097), `media-gateway/gateway.py` (proxy Torznab),
+`.bazarr_key`, `GAMING_PASSWORD` no `.env` e o `custom.js` do Homepage (modo
+local/remoto, sem segredos). O fonte do `custom.js` está em
+`deploy/homepage/src` e o artefato é gerado com esbuild.
 
 O compose vivo do Pi em `<STACK_ROOT>/docker-compose.yml` ganhou
 `radarr`, `seerr`, `homepage`, `gaming-agent`, `media-agent` e `media-gateway`;

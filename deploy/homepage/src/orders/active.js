@@ -52,6 +52,8 @@ export function createActive(ctx) {
       if (key === 'seerr') chip.title = 'Pedido aguardando aprovação no Seerr';
       chip.addEventListener('click', () => {
         state.filter = state.filter === key ? 'all' : key;
+        state.statusFilter = [];
+        state.page = 1;
         dom.filterSelect.value = state.filter;
         helpers.renderCurrent();
       });
@@ -61,23 +63,11 @@ export function createActive(ctx) {
 
   function filteredItems() {
     const q = norm(state.query);
-    const priority = { request_failed: 0, request_declined: 1, error: 2, request_pending: 3, request_approved: 4, downloading: 5, queued: 6, searching: 7, missing: 8, partial: 9, downloaded: 10 };
-    return state.items
-      .filter((item) => {
-        if (q && !norm(itemLabel(item)).includes(q)) return false;
-        const s = statusOf(item);
-        if (state.filter === 'episodes' || state.filter === 'archived') return false;
-        if (state.filter === 'active') return s === 'downloading' || s === 'queued' || s === 'searching' || s === 'requested' || s === 'request_pending' || s === 'request_approved';
-        if (state.filter === 'seerr') return s === 'request_pending' || s === 'request_approved';
-        if (state.filter === 'attention') return s === 'error' || s === 'request_declined' || s === 'request_failed';
-        if (state.filter === 'done') return s === 'downloaded' || s === 'partial' || s === 'request_completed';
-        if (state.filter === 'missing') return s === 'missing';
-        return true;
-      })
-      .sort((a, b) => {
-        const diff = (priority[statusOf(a)] ?? 9) - (priority[statusOf(b)] ?? 9);
-        return diff || itemLabel(a).localeCompare(itemLabel(b));
-      });
+    const rows = state.items.filter((item) => {
+      if (q && !norm(itemLabel(item)).includes(q)) return false;
+      return ctx.filters.matches(item);
+    });
+    return ctx.filters.sortItems(rows);
   }
 
   function progressOf(item) {
@@ -130,6 +120,12 @@ export function createActive(ctx) {
     if (item.queue && item.queue.timeleft) parts.push(item.queue.timeleft);
     if (item.searching) parts.push('busca ativa');
     if (parts.length) box.appendChild(h('div', 'hx-order-meta', parts.join(' • ')));
+    if (!item.seerrOnly) {
+      const profile = item.profileName
+        ? profileLabel(item.profileName)
+        : (item.profileId != null ? 'Perfil ' + item.profileId : '');
+      if (profile) box.appendChild(h('div', 'hx-order-meta', 'perfil ' + profile));
+    }
     if (item.kind === 'series') {
       const eps = state.episodeItems.filter((ep) => ep.seriesId === item.id);
       if (eps.length) {
@@ -181,7 +177,7 @@ export function createActive(ctx) {
     if (item.seerrOnly) {
       const hints = {
         request_pending: 'Aguardando aprovação no Seerr.',
-        request_approved: 'Aprovado no Seerr, mas ainda não apareceu no Radarr/Sonarr.',
+        request_approved: 'Aprovado no Seerr; ainda não encontrado no Radarr/Sonarr.',
         request_declined: 'Pedido recusado no Seerr; não foi enviado ao Radarr/Sonarr.',
         request_failed: 'Falha ao enviar ao Radarr/Sonarr; veja o detalhe acima.',
       };

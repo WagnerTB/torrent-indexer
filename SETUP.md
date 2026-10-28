@@ -192,7 +192,6 @@ Gere `MEILI_MASTER_KEY` e `GAMING_PASSWORD` com valores fortes e diferentes.
 
 O template do compose referencia arquivos que **não** são versionados:
 
-- `${CONFIG_ROOT}/media-agent/media_agent.py`
 - `${CONFIG_ROOT}/gaming-agent/agent.py`
 - `${CONFIG_ROOT}/media-gateway/gateway.py`
 - `${CONFIG_ROOT}/homepage/{settings,services,widgets,bookmarks}.yaml` e
@@ -200,6 +199,9 @@ O template do compose referencia arquivos que **não** são versionados:
 - configs e bancos de Radarr, Sonarr, Prowlarr, Bazarr, Jellyfin, Seerr e
   qBittorrent
 - chaves de API locais (`.env`, `.bazarr_key`, `config.xml`, `settings.json`)
+
+O `media_agent.py` é versionado em `deploy/raspberry/media-agent/`; copie-o
+para `${CONFIG_ROOT}/media-agent/` antes de subir o stack.
 
 Esses itens são específicos da instalação. Para entender cada serviço, portas,
 perfis e integrações, veja [MEDIA_STACK.md](MEDIA_STACK.md).

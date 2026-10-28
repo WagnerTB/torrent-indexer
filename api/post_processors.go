@@ -16,7 +16,7 @@ import (
 // CleanupTitleWebsites removes unwanted characters from the title
 func CleanupTitleWebsites(_ *Indexer, _ *http.Request, torrents []schema.IndexedTorrent) []schema.IndexedTorrent {
 	for i := range torrents {
-		torrents[i].Title = utils.RemoveKnownWebsites(torrents[i].Title)
+		torrents[i].Title = utils.NormalizeReleaseTitle(utils.RemoveKnownWebsites(torrents[i].Title))
 	}
 	return torrents
 }

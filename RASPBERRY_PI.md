@@ -581,6 +581,26 @@ docker compose up -d <serviço>   # atualiza um serviço só
 docker compose down              # derruba a stack inteira
 ```
 
+#### Watchdog de hardware
+
+O Pi 4 expõe `/dev/watchdog` (BCM2835, timeout de 15 s). O systemd alimenta o
+watchdog; se o sistema inteiro travar, o hardware reinicia o Pi. Isso é
+complementar ao `autoheal`, que reinicia apenas containers unhealthy.
+
+```bash
+sudo sh deploy/raspberry/setup-watchdog.sh
+systemctl show -p RuntimeWatchdogUSec -p RebootWatchdogUSec
+sudo wdctl
+```
+
+O script instala `deploy/raspberry/watchdog.conf` em
+`/etc/systemd/system.conf.d/watchdog.conf` e roda `systemctl daemon-reexec`.
+O valor de `RuntimeWatchdogSec` deve ficar em `15s` (limite do BCM2835). Se
+`/dev/watchdog` não existir, adicione `dtparam=watchdog=on` em
+`/boot/firmware/config.txt`, recarregue o módulo `bcm2835_wdt` e reinicie.
+A configuração atual já foi aplicada no Pi (`RuntimeWatchdogUSec=15s`,
+`WatchdogDevice=/dev/watchdog0`).
+
 ### 11.7 Backup
 
 - Meilisearch: parar o container e copiar o volume `meili-data`, ou usar os

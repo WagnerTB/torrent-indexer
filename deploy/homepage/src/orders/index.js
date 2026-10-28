@@ -4,6 +4,7 @@ import { createActive } from './active.js';
 import { createHistory } from './history.js';
 import { createEpisodes } from './episodes.js';
 import { createAddSeries } from './add-series.js';
+import { createFilters, PAGE_SIZE } from './filters.js';
 
 export function initOrders(root) {
   const state = {
@@ -19,6 +20,11 @@ export function initOrders(root) {
     view: 'active',
     filter: 'all',
     originFilter: 'all',
+    typeFilter: 'all',
+    profileFilter: 'all',
+    statusFilter: [],
+    profiles: [],
+    page: 1,
     query: '',
     loading: false,
     busy: false,
@@ -60,8 +66,11 @@ export function initOrders(root) {
   originSelect.hidden = true;
 
   const refreshBtn = btn('Atualizar', 'hx-refresh', () => (state.view === 'history' ? history.loadHistory(true) : load(false)));
+  const filtersBtn = btn('Filtros', 'hx-filters-btn', () => filters.open());
+  filtersBtn.setAttribute('aria-haspopup', 'dialog');
+  filtersBtn.setAttribute('aria-expanded', 'false');
   const toolbar = h('div', 'hx-toolbar', '');
-  toolbar.append(searchInput, filterSelect, originSelect, refreshBtn);
+  toolbar.append(searchInput, filterSelect, filtersBtn, originSelect, refreshBtn);
 
   function updateFilterOptions() {
     const options = state.view === 'history' ? HISTORY_FILTERS : ACTIVE_FILTERS;
@@ -83,6 +92,8 @@ export function initOrders(root) {
   status.appendChild(statusText);
   status.style.marginBottom = '10px';
   const list = h('div', '', '');
+  const pagination = h('div', 'hx-pager', '');
+  pagination.hidden = true;
 
   const activeBtn = btn('Ativos', '', () => setView('active'));
   const historyBtn = btn('Histórico', '', () => setView('history'));
@@ -142,12 +153,13 @@ export function initOrders(root) {
   historySection.append(historySummary, historyActions, historyList, historyMore);
 
   const help = helpBox([
-    'Ativos mostra os perfis dublados do Radarr/Sonarr e os pedidos do Seerr.',
+    'Ativos mostra os pedidos e itens dos perfis acompanhados. Use Filtros para tipo, perfil e status.',
+    'A lista mostra 10 itens por página, do mais recente ao mais antigo; use as páginas para ver o restante.',
     '“Adicionar série/anime” usa o Sonarr. Filmes e pedidos gerais são feitos no Seerr (busca do topo ou “Abrir Seerr”).',
     'Ciclo: Pendente → Aprovado → Procurando → Baixando → Baixado.',
     'Pedidos (vídeo) e Legendas (legenda) são fluxos separados.',
     'O Histórico guarda tudo que já passou; arquivar não apaga. Ele começa na implementação e pedidos antigos só aparecem se foram importados.',
-    'Itens não monitorados ou fora dos perfis 8/9 podem sair do Ativos; o Histórico mantém.',
+    'Itens não monitorados ou fora dos perfis filtrados podem não aparecer; o Histórico mantém.',
     'No modo remoto (Tailscale), os cards de gestão ficam ocultos; use Pedidos e Legendas.',
     'Para ligar o PC no modo remoto, use a senha definida no servidor.',
   ]);
@@ -157,10 +169,12 @@ export function initOrders(root) {
     filterSelect,
     originSelect,
     refreshBtn,
+    filtersBtn,
     toolbar,
     summary,
     status,
     list,
+    pagination,
     activeBtn,
     historyBtn,
     segments,
@@ -179,13 +193,15 @@ export function initOrders(root) {
   };
 
   const ctx = { state, dom, helpers: {} };
+  const filters = createFilters(ctx);
+  ctx.filters = filters;
   const active = createActive(ctx);
   const history = createHistory(ctx);
   const episodes = createEpisodes(ctx);
   const add = createAddSeries(ctx);
   add.bar.appendChild(seerrLink);
 
-  root.append(help, viewBar, add.bar, add.body, toolbar, summary, status, list, episodeSection, historySection);
+  root.append(help, viewBar, add.bar, add.body, toolbar, summary, status, list, pagination, episodeSection, historySection);
 
   function setStatus(text, color) {
     statusText.textContent = text;
@@ -218,18 +234,84 @@ export function initOrders(root) {
     }
   }
 
+  function pageWindow(current, total) {
+    if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
+    const pages = new Set([1, total, current, current - 1, current + 1]);
+    const sorted = [...pages].filter((page) => page >= 1 && page <= total).sort((a, b) => a - b);
+    const out = [];
+    let previous = 0;
+    for (const page of sorted) {
+      if (previous && page - previous > 1) out.push('…');
+      out.push(page);
+      previous = page;
+    }
+    return out;
+  }
+
+  function scrollToList() {
+    if (dom.list && typeof dom.list.scrollIntoView === 'function') {
+      dom.list.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function renderPager(total, pageCount) {
+    dom.pagination.innerHTML = '';
+    if (total <= PAGE_SIZE) {
+      dom.pagination.hidden = true;
+      return;
+    }
+    dom.pagination.hidden = false;
+
+    const previous = btn('‹', 'hx-page', () => {
+      if (state.page <= 1) return;
+      state.page -= 1;
+      renderList();
+      scrollToList();
+    });
+    previous.disabled = state.page === 1;
+    previous.setAttribute('aria-label', 'Página anterior');
+    dom.pagination.appendChild(previous);
+
+    for (const page of pageWindow(state.page, pageCount)) {
+      if (page === '…') {
+        dom.pagination.appendChild(h('span', 'hx-page-info', '…'));
+        continue;
+      }
+      const button = btn(String(page), 'hx-page', () => {
+        state.page = page;
+        renderList();
+        scrollToList();
+      });
+      button.setAttribute('aria-label', `Página ${page}`);
+      if (page === state.page) button.setAttribute('aria-current', 'page');
+      dom.pagination.appendChild(button);
+    }
+
+    const next = btn('›', 'hx-page', () => {
+      if (state.page >= pageCount) return;
+      state.page += 1;
+      renderList();
+      scrollToList();
+    });
+    next.disabled = state.page === pageCount;
+    next.setAttribute('aria-label', 'Próxima página');
+    dom.pagination.appendChild(next);
+    dom.pagination.appendChild(h('span', 'hx-page-info', `Página ${state.page} de ${pageCount} • ${countLabel(total, 'pedido', 'pedidos')}`));
+  }
+
   function renderList() {
     active.renderSummary(state.items);
     const rows = active.filteredItems();
     dom.list.innerHTML = '';
     if (!rows.length) {
+      dom.pagination.hidden = true;
       const hasEpisodes = episodes.filteredEpisodes().length > 0;
       if (state.items.length) {
         dom.list.appendChild(h('div', 'hx-empty', 'Nenhum pedido corresponde ao filtro.'));
         return;
       }
       if (hasEpisodes) {
-        dom.list.appendChild(h('div', 'hx-empty', 'Nenhum filme/série dublado no momento.'));
+        dom.list.appendChild(h('div', 'hx-empty', 'Nenhum filme/série no momento.'));
         return;
       }
       const empty = h('div', 'hx-empty', 'Nada por aqui. Adicione uma série/anime ou peça um filme no Seerr.');
@@ -245,7 +327,14 @@ export function initOrders(root) {
       dom.list.appendChild(empty);
       return;
     }
-    for (const item of rows) dom.list.appendChild(active.renderOrder(item));
+
+    const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    state.page = Math.max(1, Math.min(state.page, pageCount));
+    const start = (state.page - 1) * PAGE_SIZE;
+    for (const item of rows.slice(start, start + PAGE_SIZE)) {
+      dom.list.appendChild(active.renderOrder(item));
+    }
+    renderPager(rows.length, pageCount);
   }
 
   function renderCurrent() {
@@ -255,6 +344,7 @@ export function initOrders(root) {
       renderList();
       episodes.renderEpisodeRequests();
     }
+    if (ctx.filters) ctx.filters.updateButton();
   }
 
   function updatedSuffix() {
@@ -263,8 +353,8 @@ export function initOrders(root) {
 
   function activeStatusText() {
     const itemsPart = state.items.length
-      ? `${countLabel(state.items.length, 'item', 'itens')} nos perfis dublados`
-      : 'Nenhum filme/série dublado no momento';
+      ? `${countLabel(state.items.length, 'item', 'itens')} no total`
+      : 'Nenhum item no momento';
     const episodesPart = state.episodeItems.length
       ? countLabel(state.episodeItems.length, 'episódio pedido', 'episódios pedidos')
       : 'Nenhum episódio pedido';
@@ -282,6 +372,8 @@ export function initOrders(root) {
     add.setActive(state.view === 'active');
     dom.summary.hidden = state.view !== 'active';
     dom.list.hidden = state.view !== 'active';
+    dom.filtersBtn.hidden = false;
+    dom.pagination.hidden = state.view !== 'active';
     dom.episodeSection.hidden = state.view !== 'active' || !episodes.filteredEpisodes().length;
     dom.historySection.hidden = state.view !== 'history';
     if (state.view === 'history') {
@@ -310,6 +402,7 @@ export function initOrders(root) {
         ordersApi('/requests?view=active&kind=episode&pageSize=500').catch(() => ({ items: [], total: 0 })),
       ]);
       state.items = payload.items || [];
+      state.profiles = payload.profiles || [];
       state.episodeItems = episodePayload.items || [];
       state.lastLoaded = Date.now();
       publish(state.items, state.episodeItems.length);
@@ -337,8 +430,8 @@ export function initOrders(root) {
   helpers.renderEpisodeRequests = episodes.renderEpisodeRequests;
   helpers.loadHistory = history.loadHistory;
 
-  searchInput.addEventListener('input', () => { state.query = searchInput.value; renderCurrent(); });
-  filterSelect.addEventListener('change', () => { state.filter = filterSelect.value; renderCurrent(); });
+  searchInput.addEventListener('input', () => { state.query = searchInput.value; state.page = 1; renderCurrent(); });
+  filterSelect.addEventListener('change', () => { state.filter = filterSelect.value; state.statusFilter = []; state.page = 1; renderCurrent(); });
   originSelect.addEventListener('change', () => { state.originFilter = originSelect.value; renderCurrent(); });
 
   setView('active');
