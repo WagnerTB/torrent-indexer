@@ -141,6 +141,15 @@ func (i *Requster) ExpireDocument(ctx context.Context, url string) error {
 	return i.c.Del(ctx, key)
 }
 
+func (i *Requster) GetDocumentWithFlareSolverr(ctx context.Context, url string, referer ...string) (io.ReadCloser, error) {
+	ref := ""
+	if len(referer) > 0 {
+		ref = referer[0]
+	}
+	_ = ref
+	return i.fs.Get(ctx, url, 3)
+}
+
 // hasChallange checks if the body contains a challange by regex matching
 func hasChallange(body []byte) bool {
 	return challangeRegex.Match(body)

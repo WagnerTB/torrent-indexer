@@ -91,6 +91,12 @@ func (i *Indexer) HandlerComandoIndexer(w http.ResponseWriter, r *http.Request) 
 	doc.Find("article").Each(func(i int, s *goquery.Selection) {
 		// get link from h2.entry-title > a
 		link, _ := s.Find("h2.entry-title > a").Attr("href")
+		lower := strings.ToLower(link)
+		// Skip the giant "listão" page: it has hundreds of magnets and is not a
+		// single release, which makes the API response very slow.
+		if link == "" || strings.Contains(lower, "listao") || strings.Contains(lower, "lista-de") {
+			return
+		}
 		links = append(links, link)
 	})
 

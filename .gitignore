@@ -1,1 +1,22 @@
 .vercel
+
+# Secrets / local configuration
+.env
+.env.*
+!.env.example
+.gaming_password
+.bazarr_key
+*.pem
+*.key
+requests.db
+state/
+
+# Local runbook backups with real IPs/MACs
+*.local.md
+*.bak.*
+
+# Local build artifacts
+/torrent-indexer.exe
+/torrent-indexer-linux-arm64
+/torrent-indexer-linux-arm64-new
+/dist/

@@ -188,6 +188,13 @@ func ApplySorting(_ *Indexer, r *http.Request, torrents []schema.IndexedTorrent)
 			cmp = strings.Compare(strings.ToLower(i.OriginalTitle), strings.ToLower(j.OriginalTitle))
 		case "year":
 			cmp = strings.Compare(i.Year, j.Year)
+		case "season":
+			cmp = i.Season - j.Season
+			if cmp == 0 {
+				cmp = i.Episode - j.Episode
+			}
+		case "episode":
+			cmp = i.Episode - j.Episode
 		case "date":
 			if i.Date.Before(j.Date) {
 				cmp = -1
@@ -232,6 +239,26 @@ func FilterBy(_ *Indexer, r *http.Request, torrents []schema.IndexedTorrent) []s
 	audioParam := r.URL.Query().Get("audio")
 	yearParam := r.URL.Query().Get("year")
 	imdbParam := r.URL.Query().Get("imdb")
+	minSeeds := 0
+	if minSeedsParam := r.URL.Query().Get("min_seeds"); minSeedsParam != "" {
+		if value, err := strconv.Atoi(minSeedsParam); err == nil {
+			minSeeds = value
+		}
+	}
+
+	seasonFilter := 0
+	if seasonParam := r.URL.Query().Get("season"); seasonParam != "" {
+		if value, err := strconv.Atoi(seasonParam); err == nil {
+			seasonFilter = value
+		}
+	}
+
+	episodeFilter := 0
+	if episodeParam := r.URL.Query().Get("episode"); episodeParam != "" {
+		if value, err := strconv.Atoi(episodeParam); err == nil {
+			episodeFilter = value
+		}
+	}
 
 	var requestedAudioTags []string
 	if audioParam != "" {
@@ -244,7 +271,8 @@ func FilterBy(_ *Indexer, r *http.Request, torrents []schema.IndexedTorrent) []s
 	}
 
 	// If no filters are active, return original list
-	if len(requestedAudioTags) == 0 && yearParam == "" && imdbParam == "" {
+	if len(requestedAudioTags) == 0 && yearParam == "" && imdbParam == "" &&
+		minSeeds <= 0 && seasonFilter <= 0 && episodeFilter <= 0 {
 		return torrents
 	}
 
@@ -275,6 +303,19 @@ func FilterBy(_ *Indexer, r *http.Request, torrents []schema.IndexedTorrent) []s
 			if !strings.Contains(it.IMDB, imdbParam) {
 				return false
 			}
+		}
+
+		// Filter by minimum number of seeders
+		if minSeeds > 0 && it.SeedCount < minSeeds {
+			return false
+		}
+
+		// Filter by season/episode
+		if seasonFilter > 0 && it.Season != seasonFilter {
+			return false
+		}
+		if episodeFilter > 0 && it.Episode != episodeFilter {
+			return false
 		}
 
 		return true

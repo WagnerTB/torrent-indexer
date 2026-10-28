@@ -160,7 +160,7 @@ func (g *Goscrape) connect() (net.Conn, uint64, error) {
 		if action := binary.BigEndian.Uint32(buf[0:]); action != actionConnect {
 			return nil, 0, ErrInvalidAction
 		}
-		if tid := binary.BigEndian.Uint32(buf[4:]); tid != tid {
+		if respTid := binary.BigEndian.Uint32(buf[4:]); respTid != tid {
 			return nil, 0, ErrInvalidTransactionID
 		}
 

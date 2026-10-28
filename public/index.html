@@ -23,6 +23,23 @@
         class="w-full max-w-lg px-4 py-2 rounded-md border border-gray-600 bg-gray-800 text-white focus:ring focus:ring-blue-500">
       <button id="search-btn"
         class="ml-4 px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-md font-bold text-white">Search</button>
+      <label class="flex items-center gap-2 ml-4 text-gray-300 whitespace-nowrap">
+        <input id="only-with-seeds" type="checkbox" checked class="h-4 w-4">
+        Only with seeds
+      </label>
+    </div>
+    <div class="flex flex-wrap justify-center gap-3 mb-10">
+      <select id="sort-by"
+        class="px-3 py-2 rounded-md border border-gray-600 bg-gray-800 text-white">
+        <option value="seeds">Mais seeds</option>
+        <option value="date">Mais recentes</option>
+        <option value="season">Temporada/Episódio</option>
+        <option value="title">Título</option>
+      </select>
+      <select id="season-filter"
+        class="px-3 py-2 rounded-md border border-gray-600 bg-gray-800 text-white">
+        <option value="">Todas as temporadas</option>
+      </select>
     </div>
     
     <!-- Results Section -->
@@ -115,27 +132,36 @@
 
     // Function to render a single torrent result
     function renderTorrent(torrent) {
+      const audio = Array.isArray(torrent.audio) ? torrent.audio.join(', ') : '';
+      const season = torrent._season || torrent.season || 0;
+      const episode = torrent._episode || torrent.episode || 0;
+      const episodeBadge = season
+        ? `<span class="ml-2 text-xs px-2 py-1 rounded bg-blue-900 text-blue-300">${episode
+          ? `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
+          : `Temporada ${season}`}</span>`
+        : '';
       return `
         <div class="p-6 bg-gray-800 rounded-lg shadow-md flex flex-col md:flex-row gap-6">
           <!-- Torrent Title and Details -->
           <div class="flex-grow">
             <h2 class="text-2xl font-bold text-blue-400 flex items-center gap-2">
-              <span>${torrent.title}</span>
-              <span class="text-sm text-gray-400">(${torrent.year})</span>
+              <span>${torrent.title || 'Sem título'}</span>
+              <span class="text-sm text-gray-400">(${torrent.year || ''})</span>
+              ${episodeBadge}
             </h2>
-            <p class="text-gray-500 italic mt-1">${torrent.original_title}</p>
+            <p class="text-gray-500 italic mt-1">${torrent.original_title || ''}</p>
             <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <p><strong>Audio:</strong> ${torrent.audio.join(', ')}</p>
-              <p><strong>Size:</strong> ${torrent.size}</p>
-              <p><strong>Seeds:</strong> ${torrent.seed_count} | <strong>Leeches:</strong> ${torrent.leech_count}</p>
-              <p><strong>Info Hash:</strong> <span class="text-sm break-all text-gray-300">${torrent.info_hash}</span></p>
+              <p><strong>Audio:</strong> ${audio}</p>
+              <p><strong>Size:</strong> ${torrent.size || 'N/A'}</p>
+              <p><strong>Seeds:</strong> ${torrent.seed_count || 0} | <strong>Leeches:</strong> ${torrent.leech_count || 0}</p>
+              <p><strong>Info Hash:</strong> <span class="text-sm break-all text-gray-300">${torrent.info_hash || ''}</span></p>
             </div>
           </div>
 
           <!-- Actions -->
           <div class="flex flex-col justify-between items-start md:items-end">
             <div>
-              <a href="${torrent.imdb}" target="_blank"
+              <a href="${torrent.imdb || '#'}" target="_blank"
                 class="flex items-center gap-2 text-blue-500 hover:text-blue-400 font-medium">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -143,7 +169,7 @@
                 </svg>
                 View on IMDB
               </a>
-              <a href="${torrent.details}" target="_blank"
+              <a href="${torrent.details || '#'}" target="_blank"
                 class="flex items-center gap-2 text-blue-500 hover:text-blue-400 font-medium mt-2">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -152,7 +178,7 @@
                 View Details
               </a>
             </div>
-            <a href="${torrent.magnet_link}" target="_blank"
+            <a href="${torrent.magnet_link || '#'}" target="_blank"
               class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-md flex items-center gap-2 mt-4">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -165,6 +191,225 @@
       `;
     }
 
+    const LIVE_INDEXERS = [
+      'torrent-dos-filmes',
+      'rede_torrent',
+      'starck-filmes',
+      'comando_torrents'
+    ];
+
+    async function fetchLiveIndexer(indexer, query, onlyWithSeeds) {
+      const minSeedsParam = onlyWithSeeds ? '&min_seeds=1' : '';
+      const url = `/indexers/${indexer}?q=${encodeURIComponent(query)}&filter_results=true&limit=50${minSeedsParam}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60000);
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) {
+          return [];
+        }
+        const data = await response.json();
+        return (data.results || []).map((item) => ({ ...item, source: indexer }));
+      } catch (error) {
+        console.warn(`Live search failed for ${indexer}`, error);
+        return [];
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function liveSearch(query, onlyWithSeeds) {
+      const lists = await Promise.all(
+        LIVE_INDEXERS.map((indexer) => fetchLiveIndexer(indexer, query, onlyWithSeeds))
+      );
+      const merged = [];
+      const seen = new Set();
+      for (const list of lists) {
+        for (const item of list) {
+          const key = item.info_hash || item.magnet_link;
+          if (key && seen.has(key)) {
+            continue;
+          }
+          if (key) {
+            seen.add(key);
+          }
+          merged.push(item);
+        }
+      }
+      merged.sort((a, b) => (b.seed_count || 0) - (a.seed_count || 0));
+      return merged;
+    }
+
+    function showLoading(message) {
+      document.getElementById('results').innerHTML = `
+        <div class="p-6 bg-gray-800 rounded-lg shadow-md text-center">
+          <p class="text-xl font-bold text-blue-400">${message}</p>
+          <p class="text-gray-500 mt-2">Isso pode levar alguns segundos.</p>
+        </div>
+      `;
+    }
+
+    let currentResults = [];
+    let currentIsLive = false;
+
+    function parseSeasonEpisode(title) {
+      const text = title || '';
+      let match = text.match(/\bS(\d{1,2})[\s._-]*E(\d{1,3})\b/i);
+      if (match) {
+        return { season: parseInt(match[1], 10), episode: parseInt(match[2], 10), type: 'episode' };
+      }
+      match = text.match(/\b(\d{1,2})x(\d{1,2})\b/i);
+      if (match) {
+        return { season: parseInt(match[1], 10), episode: parseInt(match[2], 10), type: 'episode' };
+      }
+
+      let season = 0;
+      match = text.match(/(?:temporada|season)\s*(\d{1,2})\b/i);
+      if (match) {
+        season = parseInt(match[1], 10);
+      } else {
+        match = text.match(/\b(\d{1,2})\s*[ªa]?\s*temporada\b/i);
+        if (match) {
+          season = parseInt(match[1], 10);
+        }
+      }
+      if (!season) {
+        match = text.match(/\bS(\d{1,2})\b/i);
+        if (match) {
+          season = parseInt(match[1], 10);
+        }
+      }
+
+      let episode = 0;
+      match = text.match(/\b(?:epis[oó]dio|ep\.?)\s*(\d{1,3})\b/i);
+      if (match) {
+        episode = parseInt(match[1], 10);
+      }
+
+      if (/\b(?:temporada\s+completa|season\s+complete|complete\s+season|s[eé]rie\s+completa|complete\s+series)\b/i.test(text)) {
+        return { season, episode: 0, type: season ? 'season' : 'series' };
+      }
+      if (episode) {
+        return { season, episode, type: 'episode' };
+      }
+      if (season) {
+        return { season, episode: 0, type: 'season' };
+      }
+      return { season: 0, episode: 0, type: '' };
+    }
+
+    function prepareResult(item) {
+      const parsed = parseSeasonEpisode(item.title || item.original_title || '');
+      return {
+        ...item,
+        _season: Number(item.season) || parsed.season || 0,
+        _episode: Number(item.episode) || parsed.episode || 0,
+        _releaseType: item.release_type || parsed.type || ''
+      };
+    }
+
+    function getPreparedResults() {
+      return currentResults.map(prepareResult);
+    }
+
+    function updateSeasonOptions() {
+      const select = document.getElementById('season-filter');
+      const selected = select.value;
+      const seasons = [...new Set(
+        getPreparedResults()
+          .map((item) => item._season)
+          .filter((season) => season > 0)
+      )].sort((a, b) => a - b);
+
+      select.innerHTML = '<option value="">Todas as temporadas</option>' +
+        seasons.map((season) => `<option value="${season}">Temporada ${season}</option>`).join('');
+      if (seasons.includes(Number(selected))) {
+        select.value = selected;
+      }
+    }
+
+    function compareResults(a, b) {
+      const sortBy = document.getElementById('sort-by').value;
+      if (sortBy === 'date') {
+        return new Date(b.date || 0) - new Date(a.date || 0);
+      }
+      if (sortBy === 'title') {
+        return (a.title || '').localeCompare(b.title || '');
+      }
+      if (sortBy === 'season') {
+        return (a._season - b._season) ||
+          (a._episode - b._episode) ||
+          ((b.seed_count || 0) - (a.seed_count || 0));
+      }
+      return (b.seed_count || 0) - (a.seed_count || 0);
+    }
+
+    function renderResults() {
+      const resultsContainer = document.getElementById('results');
+      const seasonFilter = Number(document.getElementById('season-filter').value || 0);
+      let results = getPreparedResults();
+
+      if (seasonFilter > 0) {
+        results = results.filter((item) => item._season === seasonFilter);
+      }
+      results.sort(compareResults);
+
+      if (results.length === 0) {
+        const onlyWithSeeds = document.getElementById('only-with-seeds').checked;
+        const hint = onlyWithSeeds
+          ? 'Nenhum resultado com seeds. Desmarque "Only with seeds" para ver todos.'
+          : 'Try different search terms or check spelling';
+        resultsContainer.innerHTML = `
+          <div class="p-6 bg-gray-800 rounded-lg shadow-md text-center">
+            <p class="text-xl font-bold text-gray-400">No results found</p>
+            <p class="text-gray-500 mt-2">${hint}</p>
+          </div>
+        `;
+        return;
+      }
+
+      const groups = new Map();
+      for (const item of results) {
+        const key = item._season || 0;
+        if (!groups.has(key)) {
+          groups.set(key, []);
+        }
+        groups.get(key).push(item);
+      }
+
+      const groupKeys = [...groups.keys()].sort((a, b) => a - b);
+      let html = currentIsLive
+        ? `<div class="p-4 bg-gray-800 rounded-lg shadow-md text-center mb-2">
+             <p class="text-gray-300">Resultados ao vivo dos indexers. Eles também foram indexados para as próximas buscas.</p>
+           </div>`
+        : '';
+
+      for (const key of groupKeys) {
+        const label = key ? `Temporada ${key}` : 'Outros';
+        const sortBy = document.getElementById('sort-by').value;
+        const items = groups.get(key).slice().sort((a, b) => {
+          if (sortBy === 'date' || sortBy === 'title') {
+            return compareResults(a, b);
+          }
+          if (a._episode && b._episode && a._episode !== b._episode) {
+            return a._episode - b._episode;
+          }
+          if (a._episode && !b._episode) {
+            return -1;
+          }
+          if (!a._episode && b._episode) {
+            return 1;
+          }
+          return (b.seed_count || 0) - (a.seed_count || 0);
+        });
+
+        html += `<h3 class="text-xl font-bold text-white mt-6 mb-2">${label}</h3>` +
+          items.map(renderTorrent).join('');
+      }
+
+      resultsContainer.innerHTML = html;
+    }
+
     // Handle search
     async function onSearch() {
       const query = document.getElementById('search-query').value.trim();
@@ -173,28 +418,35 @@
         return;
       }
 
+      const resultsContainer = document.getElementById('results');
+      const onlyWithSeeds = document.getElementById('only-with-seeds').checked;
+      const minSeedsParam = onlyWithSeeds ? '&min_seeds=1' : '';
+
       try {
-        const response = await fetch(`/search?q=${encodeURIComponent(query)}`);
+        const response = await fetch(`/search?q=${encodeURIComponent(query)}&limit=50${minSeedsParam}`);
         if (!response.ok) {
           throw new Error('Search failed');
         }
 
         const data = await response.json();
-        const results = data.results || data; // Support both new format and fallback to old
-        const resultsContainer = document.getElementById('results');
-        
-        if (results.length === 0) {
-          resultsContainer.innerHTML = `
-            <div class="p-6 bg-gray-800 rounded-lg shadow-md text-center">
-              <p class="text-xl font-bold text-gray-400">No results found</p>
-              <p class="text-gray-500 mt-2">Try different search terms or check spelling</p>
-            </div>
-          `;
-        } else {
-          resultsContainer.innerHTML = results.map(renderTorrent).join('');
+        const cachedResults = data.results || data;
+
+        if (cachedResults.length > 0) {
+          currentResults = cachedResults;
+          currentIsLive = false;
+          updateSeasonOptions();
+          renderResults();
+          return;
         }
+
+        showLoading('Buscando ao vivo nos indexers...');
+        const liveResults = await liveSearch(query, onlyWithSeeds);
+        currentResults = liveResults;
+        currentIsLive = true;
+        updateSeasonOptions();
+        renderResults();
       } catch (error) {
-        document.getElementById('results').innerHTML = `
+        resultsContainer.innerHTML = `
           <div class="p-6 bg-red-800 rounded-lg shadow-md text-center">
             <p class="text-xl font-bold text-red-400">Error fetching search results</p>
             <p class="text-gray-400 mt-2">Please try again later.</p>
@@ -211,6 +463,9 @@
         onSearch();
       }
     });
+    document.getElementById('sort-by').addEventListener('change', renderResults);
+    document.getElementById('season-filter').addEventListener('change', renderResults);
+    document.getElementById('only-with-seeds').addEventListener('change', onSearch);
 
     // Initialize page
     document.addEventListener('DOMContentLoaded', async () => {

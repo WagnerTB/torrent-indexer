@@ -1,0 +1,318 @@
+name: media
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "2"
+
+services:
+  torrent-indexer:
+    build:
+      context: ./torrent-indexer
+      dockerfile_inline: |
+        FROM alpine:latest
+        RUN apk add --no-cache ca-certificates tzdata
+        WORKDIR /app
+        COPY torrent-indexer-linux-arm64 /app/torrent-indexer
+        RUN chmod +x /app/torrent-indexer
+        CMD ["/app/torrent-indexer"]
+    image: media/torrent-indexer:local
+    restart: unless-stopped
+    ports:
+      - "8080:7006"
+      - "${LAN_IP}:8081:8081"
+    environment:
+      TZ: ${TZ}
+      LOG_LEVEL: 1
+      PORT: 7006
+      METRICS_PORT: 8081
+      REDIS_HOST: redis
+      MEILISEARCH_ADDRESS: http://meilisearch:7700
+      MEILISEARCH_KEY: ${MEILI_MASTER_KEY}
+      FLARESOLVERR_ADDRESS: http://solvearr:8191
+      FLARESOLVERR_POOL_SIZE: 2
+      FLARESOLVERR_TIMEOUT_SECONDS: 180
+      FLARESOLVERR_USE_SESSIONS: "true"
+      REQUEST_TIMEOUT_MILLISECONDS: 10000
+    depends_on:
+      - redis
+      - meilisearch
+      - solvearr
+    mem_limit: 256m
+    logging: *default-logging
+    networks: [media]
+
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    mem_limit: 192m
+    logging: *default-logging
+    networks: [media]
+
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in .env}
+    volumes:
+      - meili-data:/meili_data
+    mem_limit: 512m
+    logging: *default-logging
+    networks: [media]
+
+  solvearr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      LOG_LEVEL: info
+      CAPTCHA_SOLVER: none
+    shm_size: 1gb
+    mem_limit: 1024m
+    logging: *default-logging
+    networks: [media]
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+      WEBUI_PORT: 8082
+    volumes:
+      - ${CONFIG_ROOT}/qbittorrent:/config
+      - ${MEDIA_ROOT}:/media
+    ports:
+      - "${LAN_IP}:8082:8082"
+      - "6881:6881"
+      - "6881:6881/udp"
+    mem_limit: 512m
+    logging: *default-logging
+    networks: [media]
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    volumes:
+      - ${CONFIG_ROOT}/sonarr2:/config
+      - ${MEDIA_ROOT}:/media
+    ports:
+      - "${LAN_IP}:8989:8989"
+    mem_limit: 512m
+    logging: *default-logging
+    networks: [media]
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    volumes:
+      - ${CONFIG_ROOT}/prowlarr:/config
+    ports:
+      - "${LAN_IP}:9696:9696"
+    mem_limit: 384m
+    logging: *default-logging
+    networks: [media]
+
+  bazarr:
+    image: linuxserver/bazarr:latest
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    volumes:
+      - ${CONFIG_ROOT}/bazarr:/config
+      - ${MEDIA_ROOT}:/media
+    ports:
+      - "${LAN_IP}:6767:6767"
+    mem_limit: 384m
+    logging: *default-logging
+    networks: [media]
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      JELLYFIN_DATA_DIR: /config
+      JELLYFIN_CACHE_DIR: /cache
+    volumes:
+      - ${CONFIG_ROOT}/jellyfin:/config
+      - ${CONFIG_ROOT}/jellyfin-cache:/cache
+      - ${MEDIA_ROOT}:/media
+    ports:
+      - "8096:8096"
+    mem_limit: 1536m
+    logging: *default-logging
+    networks: [media]
+
+  stremio-server:
+    image: stremio/server:latest
+    restart: unless-stopped
+    environment:
+      NO_CORS: "1"
+      CASTING_DISABLED: "1"
+    volumes:
+      - ${MEDIA_ROOT}/stremio-server:/root/.stremio-server
+    ports:
+      - "11470:11470"
+      - "12470:12470"
+    mem_limit: 256m
+    logging: *default-logging
+    networks: [media]
+
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    restart: unless-stopped
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: "*"
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    volumes:
+      - ${CONFIG_ROOT}/homepage:/app/config
+    ports:
+      - "3000:3000"
+    mem_limit: 384m
+    logging: *default-logging
+    networks: [media]
+
+  gaming-agent:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_RAW
+    environment:
+      PC_IP: ${PC_IP:?set PC_IP in .env}
+      PC_MAC: ${PC_MAC:?set PC_MAC in .env}
+      LISTEN_PORT: "8099"
+      LISTEN_HOST: ${LAN_IP:?set LAN_IP in .env}
+      PUBLIC_PORT: "8098"
+      GAMING_PASSWORD_FILE: /app/.gaming_password
+      GAMING_PASSWORD: ${GAMING_PASSWORD:?set GAMING_PASSWORD in .env}
+      BROADCAST: ${LAN_BROADCAST:?set LAN_BROADCAST in .env}
+    volumes:
+      - ${CONFIG_ROOT}/gaming-agent:/app:ro
+    command: ["python3", "/app/agent.py"]
+    mem_limit: 64m
+    logging: *default-logging
+
+  media-agent:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      LISTEN_PORT: "8097"
+      LISTEN_HOST: 0.0.0.0
+      ALLOWED_NETWORKS: ${ALLOWED_NETWORKS:?set ALLOWED_NETWORKS in .env}
+      BAZARR_CONFIG: /bazarr/config.yaml
+      BAZARR_URL: http://${LAN_IP}:6767
+      BAZARR_KEY_FILE: /app/.bazarr_key
+      RADARR_URL: http://${LAN_IP}:7878
+      SONARR_URL: http://${LAN_IP}:8989
+      RADARR_CONFIG: /radarr/config.xml
+      SONARR_CONFIG: /sonarr/config.xml
+      SEERR_URL: http://${LAN_IP}:5055
+      SEERR_CONFIG: /seerr/settings.json
+      RADARR_DUBBED_PROFILE: "8"
+      SONARR_DUBBED_PROFILE: "9"
+      RADARR_ORIGINAL_PROFILE: "7"
+      SONARR_ORIGINAL_PROFILE: "7"
+    volumes:
+      - ${CONFIG_ROOT}/media-agent:/app:ro
+      - ${CONFIG_ROOT}/bazarr/config/config.yaml:/bazarr/config.yaml:ro
+      - ${CONFIG_ROOT}/radarr/config.xml:/radarr/config.xml:ro
+      - ${CONFIG_ROOT}/sonarr2/config.xml:/sonarr/config.xml:ro
+      - ${CONFIG_ROOT}/seerr:/seerr:ro
+    command: ["python3", "/app/media_agent.py"]
+    mem_limit: 96m
+    logging: *default-logging
+
+
+  media-gateway:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    environment:
+      LISTEN_PORT: "8099"
+      RADARR_DB: /radarr/radarr.db
+      PROWLARR_URL: http://prowlarr:9696
+      PROWLARR_CONFIG: /prowlarr/config.xml
+      TORZNAB_API_KEY: alternate
+      TORZNAB_BRAZIL_INDEXERS: "Rede Torrent,Torrent dos Filmes,Starck Filmes,Comando Torrents"
+    volumes:
+      - ${CONFIG_ROOT}/media-gateway:/app:ro
+      - ${CONFIG_ROOT}/radarr:/radarr:ro
+      - ${CONFIG_ROOT}/prowlarr/config.xml:/prowlarr/config.xml:ro
+    command: ["python3", "/app/gateway.py"]
+    mem_limit: 128m
+    logging: *default-logging
+    networks: [media]
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    volumes:
+      - ${CONFIG_ROOT}/radarr:/config
+      - ${MEDIA_ROOT}:/media
+    ports:
+      - "${LAN_IP}:7878:7878"
+    mem_limit: 384m
+    logging: *default-logging
+    networks: [media]
+
+  seerr:
+    image: seerr/seerr:latest
+    init: true
+    container_name: seerr
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info
+      TZ: ${TZ}
+      PORT: "5055"
+    volumes:
+      - ${CONFIG_ROOT}/seerr:/app/config
+    ports:
+      - "5055:5055"
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:5055/api/v1/settings/public || exit 1
+      start_period: 20s
+      timeout: 3s
+      interval: 15s
+      retries: 3
+    security_opt:
+      - no-new-privileges
+    cap_drop:
+      - ALL
+    mem_limit: 384m
+    logging: *default-logging
+    networks: [media]
+volumes:
+  redis-data:
+  meili-data:
+
+networks:
+  media:
+
+
+
+

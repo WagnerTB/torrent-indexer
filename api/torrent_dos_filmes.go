@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -114,36 +115,22 @@ func getTorrentsTorrentDosFilmes(ctx context.Context, i *Indexer, link, referer 
 	}
 
 	article := doc.Find("article")
-	title := strings.Replace(article.Find(".title > h1").Text(), " - Download", "", -1)
+	title := strings.Replace(article.Find(".title > h1").Text(), " – Download", "", -1)
+	title = strings.Replace(title, " - Download", "", -1)
 	textContent := article.Find("div.content")
 	date := getPublishedDateFromMeta(doc)
-	magnets := textContent.Find("a[href^=\"magnet\"]")
-	var magnetLinks []string
-	magnets.Each(func(i int, s *goquery.Selection) {
-		magnetLink, _ := s.Attr("href")
-		magnetLinks = append(magnetLinks, magnetLink)
+
+	var systemAdsLinks []string
+	systemAdsLinksStr := textContent.Find("a[href*=\"systemads.net\"]")
+	systemAdsLinksStr.Each(func(i int, s *goquery.Selection) {
+		systemAdsLink, _ := s.Attr("href")
+		systemAdsLinks = append(systemAdsLinks, systemAdsLink)
 	})
 
 	var audio []schema.Audio
 	var year string
 	var size []string
 	article.Find("div.content p").Each(func(i int, s *goquery.Selection) {
-		// pattern:
-		// Título Traduzido: Fundação
-		// Título Original: Foundation
-		// IMDb: 7,5
-		// Ano de Lançamento: 2023
-		// Gênero: Ação | Aventura | Ficção
-		// Formato: MKV
-		// Qualidade: WEB-DL
-		// Áudio: Português | Inglês
-		// Idioma: Português | Inglês
-		// Legenda: Português
-		// Tamanho: –
-		// Qualidade de Áudio: 10
-		// Qualidade de Vídeo: 10
-		// Duração: 59 Min.
-		// Servidor: Torrent
 		text := s.Text()
 
 		audio = append(audio, findAudioFromText(text)...)
@@ -154,7 +141,6 @@ func getTorrentsTorrentDosFilmes(ctx context.Context, i *Indexer, link, referer 
 		size = append(size, findSizesFromText(text)...)
 	})
 
-	// find any link from imdb
 	imdbLink := ""
 	article.Find("div.content a").Each(func(i int, s *goquery.Selection) {
 		link, _ := s.Attr("href")
@@ -166,15 +152,45 @@ func getTorrentsTorrentDosFilmes(ctx context.Context, i *Indexer, link, referer 
 
 	size = utils.StableUniq(size)
 
+	var magnetLinks []string
+	textContent.Find("a[href^=\"magnet\"]").Each(func(i int, s *goquery.Selection) {
+		magnetLink, _ := s.Attr("href")
+		magnetLinks = append(magnetLinks, magnetLink)
+	})
+
+	// Older pages used systemads links that redirect to the magnet. Keep it as
+	// a fallback for pages that don't expose the magnet directly.
+	if len(magnetLinks) == 0 {
+		for _, systemAdsLink := range systemAdsLinks {
+			links, err := followSystemAdsLink(ctx, i, systemAdsLink, link)
+			if err != nil {
+				logging.Error().Err(err).Str("systemads_link", systemAdsLink).Msg("Failed to follow systemads redirect")
+				continue
+			}
+			magnetLinks = append(magnetLinks, links...)
+		}
+	}
+
+	if len(magnetLinks) == 0 {
+		return indexedTorrents, nil
+	}
+
+	if len(size) == 1 && len(magnetLinks) == 1 {
+		// only one size and one magnet link - use the single size
+	} else if len(size) == 0 || len(magnetLinks) != len(size) {
+		size = make([]string, len(magnetLinks))
+	}
+
 	var chanIndexedTorrent = make(chan schema.IndexedTorrent)
 
-	// for each magnet link, create a new indexed torrent
 	for it, magnetLink := range magnetLinks {
 		it := it
 		go func(it int, magnetLink string) {
 			magnet, err := magnet.ParseMagnetUri(magnetLink)
 			if err != nil {
 				logging.Error().Err(err).Str("magnet_link", magnetLink).Msg("Failed to parse magnet URI")
+				chanIndexedTorrent <- schema.IndexedTorrent{}
+				return
 			}
 			releaseTitle := magnet.DisplayName
 			infoHash := magnet.InfoHash.String()
@@ -186,11 +202,10 @@ func getTorrentsTorrentDosFilmes(ctx context.Context, i *Indexer, link, referer 
 				logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
 			}
 
-			title := processTitle(title, magnetAudio)
+			processedTitle := processTitle(title, magnetAudio)
 
-			// if the number of sizes is equal to the number of magnets, then assign the size to each indexed torrent in order
 			var mySize string
-			if len(size) == len(magnetLinks) {
+			if it < len(size) {
 				mySize = size[it]
 			}
 			if mySize == "" {
@@ -201,7 +216,7 @@ func getTorrentsTorrentDosFilmes(ctx context.Context, i *Indexer, link, referer 
 
 			ixt := schema.IndexedTorrent{
 				Title:         releaseTitle,
-				OriginalTitle: title,
+				OriginalTitle: processedTitle,
 				Details:       link,
 				Year:          year,
 				IMDB:          imdbLink,
@@ -220,8 +235,80 @@ func getTorrentsTorrentDosFilmes(ctx context.Context, i *Indexer, link, referer 
 
 	for i := 0; i < len(magnetLinks); i++ {
 		it := <-chanIndexedTorrent
-		indexedTorrents = append(indexedTorrents, it)
+		if it.MagnetLink != "" {
+			indexedTorrents = append(indexedTorrents, it)
+		}
 	}
 
 	return indexedTorrents, nil
+}
+
+func followSystemAdsLink(ctx context.Context, i *Indexer, systemAdsLink, referer string) ([]string, error) {
+	resp, err := i.requester.GetDocument(ctx, systemAdsLink, referer)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Close()
+
+	doc, err := goquery.NewDocumentFromReader(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	var magnetLinks []string
+	doc.Find("a[href^=\"magnet\"]").Each(func(i int, s *goquery.Selection) {
+		magnetLink, _ := s.Attr("href")
+		magnetLinks = append(magnetLinks, magnetLink)
+	})
+
+	if len(magnetLinks) > 0 {
+		return magnetLinks, nil
+	}
+
+	redirectURL := findRedirectInHTML(doc)
+	if redirectURL != "" {
+		logging.Debug().Str("redirect", redirectURL).Msg("Found redirect URL in systemads page, following")
+		if utils.IsMagnetLink(redirectURL) {
+			return []string{redirectURL}, nil
+		}
+		resp2, err := i.requester.GetDocument(ctx, redirectURL, systemAdsLink)
+		if err == nil {
+			defer resp2.Close()
+			doc2, err := goquery.NewDocumentFromReader(resp2)
+			if err == nil {
+				doc2.Find("a[href^=\"magnet\"]").Each(func(i int, s *goquery.Selection) {
+					magnetLink, _ := s.Attr("href")
+					magnetLinks = append(magnetLinks, magnetLink)
+				})
+			}
+		}
+	}
+
+	return magnetLinks, nil
+}
+
+func findRedirectInHTML(doc *goquery.Document) string {
+	metaContent, _ := doc.Find("meta[http-equiv=\"refresh\"]").Attr("content")
+	if metaContent != "" {
+		re := regexp.MustCompile(`(?i)url=(.+)`)
+		match := re.FindStringSubmatch(metaContent)
+		if len(match) > 1 {
+			return strings.TrimSpace(match[1])
+		}
+	}
+
+	html, _ := doc.Html()
+	re := regexp.MustCompile(`window\.location\s*=\s*["']([^"']+)["']`)
+	match := re.FindStringSubmatch(html)
+	if len(match) > 1 {
+		return strings.TrimSpace(match[1])
+	}
+
+	re = regexp.MustCompile(`document\.location\s*=\s*["']([^"']+)["']`)
+	match = re.FindStringSubmatch(html)
+	if len(match) > 1 {
+		return strings.TrimSpace(match[1])
+	}
+
+	return ""
 }

@@ -137,13 +137,16 @@ func getSeparator(s string) string {
 // It looks for patterns like "Áudio: Português, Inglês" or "Idioma: Português, Inglês"
 func findAudioFromText(text string) []schema.Audio {
 	var audio []schema.Audio
-	re := regexp.MustCompile(`(.udio|Idioma|Languages):.?(.*)`)
+	re := regexp.MustCompile(`(?:^|\n|•|·)\s*(?:.udio|Idioma|Languages):\s*(.*)`)
 	audioMatch := re.FindStringSubmatch(text)
 	if len(audioMatch) > 0 {
-		sep := getSeparator(audioMatch[2])
-		langs_raw := strings.Split(audioMatch[2], sep)
+		sep := getSeparator(audioMatch[1])
+		langs_raw := strings.Split(audioMatch[1], sep)
 		for _, lang := range langs_raw {
 			lang = strings.TrimSpace(lang)
+			if isNonLanguageToken(lang) {
+				continue
+			}
 			a := schema.GetAudioFromString(lang)
 			if a != nil {
 				audio = append(audio, *a)
@@ -156,6 +159,27 @@ func findAudioFromText(text string) []schema.Audio {
 		}
 	}
 	return audio
+}
+
+var nonLanguageTokens = map[string]bool{
+	"AC3":   true,
+	"EAC3":  true,
+	"DTS":   true,
+	"AAC":   true,
+	"10":    true,
+	"10/10": true,
+	"–":     true,
+	"S/L":   true,
+}
+
+func isNonLanguageToken(s string) bool {
+	if _, ok := nonLanguageTokens[strings.ToUpper(s)]; ok {
+		return true
+	}
+	if matched, _ := regexp.MatchString(`^\d+$`, s); matched {
+		return true
+	}
+	return false
 }
 
 // findYearFromText extracts the year from a given text.

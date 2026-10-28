@@ -68,12 +68,14 @@ func main() {
 		logging.Info().Dur("expiration", shortLivedCacheExpiration).Msg("Setting short-lived cache expiration")
 		req.SetShortLivedCacheExpiration(shortLivedCacheExpiration)
 	}
-	longLivedCacheExpiration, err := str2duration.ParseDuration(os.Getenv("LONG_LIVED_CACHE_EXPIRATION"))
-	if err == nil {
-		logging.Info().Dur("expiration", longLivedCacheExpiration).Msg("Setting long-lived cache expiration")
-		redis.SetDefaultExpiration(longLivedCacheExpiration)
-	} else {
-		logging.Error().Err(err).Msg("Failed to parse long-lived cache expiration")
+	if v := os.Getenv("LONG_LIVED_CACHE_EXPIRATION"); v != "" {
+		longLivedCacheExpiration, err := str2duration.ParseDuration(v)
+		if err == nil {
+			logging.Info().Dur("expiration", longLivedCacheExpiration).Msg("Setting long-lived cache expiration")
+			redis.SetDefaultExpiration(longLivedCacheExpiration)
+		} else {
+			logging.Error().Err(err).Msg("Failed to parse long-lived cache expiration")
+		}
 	}
 
 	icfg := handler.IndexersConfig{
@@ -94,6 +96,8 @@ func main() {
 	indexerMux.HandleFunc("/indexers/torrent-dos-filmes", indexers.HandlerTorrentDosFilmesIndexer)
 	indexerMux.HandleFunc("/indexers/vaca_torrent", indexers.HandlerVacaTorrentIndexer)
 	indexerMux.HandleFunc("/indexers/manual", indexers.HandlerManualIndexer)
+	indexerMux.HandleFunc("/api", indexers.HandlerTorznabAPI)
+	indexerMux.HandleFunc("/api/", indexers.HandlerTorznabAPI)
 	indexerMux.HandleFunc("/search", search.SearchTorrentHandler)
 	indexerMux.HandleFunc("/search/health", search.HealthHandler)
 	indexerMux.HandleFunc("/search/stats", search.StatsHandler)
@@ -120,7 +124,7 @@ func main() {
 		port = "7006"
 	}
 
-	logging.Info().Str("port", port).Msg("Server listening")
+	logging.Info().Str("port", port).Msg("HTTP server listening (press Ctrl+C to stop)")
 	err = http.ListenAndServe(":"+port, loggedIndexerMux)
 	if err != nil {
 		logging.Fatal().Err(err).Msg("Server failed to start")

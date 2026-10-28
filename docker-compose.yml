@@ -1,7 +1,6 @@
-version: '3'
-
 services:
   torrent-indexer:
+    build: .
     image: felipemarinho97/torrent-indexer:latest
     container_name: torrent-indexer
     restart: unless-stopped
@@ -9,14 +8,18 @@ services:
       - 8080:7006
     networks:
       - indexer
+    depends_on:
+      - redis
+      - flaresolverr
+      - meilisearch
     environment:
       - LOG_LEVEL=0 # 0=debug, 1=info, 2=warn, 3=error
       - REDIS_HOST=redis
       - FLARESOLVERR_ADDRESS=http://flaresolverr:8191
 
-      ## Meilisearch configuration (optional)
-      # - MEILISEARCH_ADDRESS=http://meilisearch:7700
-      # - MEILISEARCH_KEY=my-secret-key
+      ## Meilisearch configuration (MEILI_MASTER_KEY comes from .env)
+      - MEILISEARCH_ADDRESS=http://meilisearch:7700
+      - MEILISEARCH_KEY=${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in .env}
 
       ## Magnet Metadata API configuration (optional)
       # - MAGNET_METADATA_API_ENABLED=false
@@ -30,19 +33,29 @@ services:
     networks:
       - indexer
 
+  ##### FLARESOLVERR #####
+  ## Required for Cloudflare-protected indexers (comando_torrents, bludv).
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    networks:
+      - indexer
+    environment:
+      - LOG_LEVEL=info
+      - TZ=America/Sao_Paulo
+
   ##### MEILISEARCH #####
-  ## This container is not necessary for the indexer to work,
-  ## deploy if you want to use the search feature
-  #
-  # meilisearch: 
-  #   image: getmeili/meilisearch:latest
-  #   container_name: meilisearch
-  #   restart: unless-stopped
-  #   networks:
-  #     - indexer
-  #   environment:
-  #     - MEILI_NO_ANALYTICS=true
-  #     - MEILI_MASTER_KEY=my-secret-key
+  ## Powers the unified /search endpoint and the /ui/ interface.
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: meilisearch
+    restart: unless-stopped
+    networks:
+      - indexer
+    environment:
+      - MEILI_NO_ANALYTICS=true
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in .env}
 
   ##### MAGNET METADATA API #####
   ## This container is not necessary for the indexer to work,
@@ -61,14 +74,14 @@ services:
   #   environment:
   #     - PORT=8080
   #     - REDIS_URL=redis://redis:6379
-  #     - CACHE_DIR=/home/torrent/cache
+  #     - CACHE_DIR=/home/<user>/cache
   #     - ENABLE_DOWNLOADS=false
   #     - DOWNLOAD_BASE_URL=http://localhost:8999
   #     - CLIENT_PORT=42069
   #     - SEEDING_ENABLED=false
   #     - FALLBACK_INITIAL_CHUNK_SIZE_KB=24
   #   volumes:
-  #     - ./magnet-metadata-cache:/home/torrent/cache
+  #     - ./magnet-metadata-cache:/home/<user>/cache
 
 networks:
   indexer:

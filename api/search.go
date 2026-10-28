@@ -59,10 +59,39 @@ func (h *MeilisearchHandler) SearchTorrentHandler(w http.ResponseWriter, r *http
 		}
 	}
 
-	results, err := h.Module.SearchTorrent(query, limit)
+	searchLimit := limit
+	if hasSearchFilters(r) {
+		searchLimit = limit * 5
+		if searchLimit < 100 {
+			searchLimit = 100
+		}
+	}
+
+	results, err := h.Module.SearchTorrent(query, searchLimit)
 	if err != nil {
 		http.Error(w, "Failed to search torrents", http.StatusInternalServerError)
 		return
+	}
+
+	for i := range results {
+		if results[i].Season != 0 || results[i].Episode != 0 || results[i].ReleaseType != "" {
+			continue
+		}
+		season, episode, releaseType := ParseSeasonEpisode(results[i].Title)
+		if season == 0 && episode == 0 && releaseType == "" {
+			season, episode, releaseType = ParseSeasonEpisode(results[i].OriginalTitle)
+		}
+		results[i].Season = season
+		results[i].Episode = episode
+		results[i].ReleaseType = releaseType
+	}
+
+	results = FilterBy(nil, r, results)
+	if r.URL.Query().Get("sortBy") != "" {
+		results = ApplySorting(nil, r, results)
+	}
+	if len(results) > limit {
+		results = results[:limit]
 	}
 
 	// Format response to match indexers structure
@@ -160,4 +189,13 @@ func (h *MeilisearchHandler) StatsHandler(w http.ResponseWriter, r *http.Request
 // getCurrentTimestamp returns the current timestamp in RFC3339 format
 func getCurrentTimestamp() string {
 	return time.Now().Format(time.RFC3339)
+}
+
+func hasSearchFilters(r *http.Request) bool {
+	for _, key := range []string{"min_seeds", "season", "episode", "audio", "year", "imdb"} {
+		if r.URL.Query().Get(key) != "" {
+			return true
+		}
+	}
+	return false
 }

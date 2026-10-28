@@ -20,7 +20,7 @@ import (
 
 var starck_filmes = IndexerMeta{
 	Label:       "starck_filmes",
-	URL:         utils.GetIndexerURLFromEnv("INDEXER_STARCK_FILMES_URL", "https://www.starckfilmes-v10.com/"),
+	URL:         utils.GetIndexerURLFromEnv("INDEXER_STARCK_FILMES_URL", "https://starckfilmes-v27.com/"),
 	SearchURL:   "?s=",
 	PagePattern: "page/%s",
 }
@@ -142,6 +142,24 @@ func getTorrentStarckFilmes(ctx context.Context, i *Indexer, link, referer strin
 		magnetLinks = append(magnetLinks, magnetLink)
 	})
 
+	// Newer pages hide the magnet behind a filmedl.com redirect chain.
+	var filmedlLinks []string
+	post.Find("a[href*=\"filmedl.com/?xid=\"]").Each(func(_ int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		if href != "" {
+			filmedlLinks = append(filmedlLinks, href)
+		}
+	})
+	for _, filmedlLink := range filmedlLinks {
+		magnetLink, err := resolveFilmedlMagnet(ctx, filmedlLink, link)
+		if err != nil {
+			logging.Warn().Err(err).Str("url", filmedlLink).Msg("Failed to resolve filmedl download link, skipping")
+			continue
+		}
+		magnetLinks = append(magnetLinks, magnetLink)
+	}
+	magnetLinks = utils.StableUniq(magnetLinks)
+
 	var audio []schema.Audio
 	var year string
 	var size []string
@@ -208,7 +226,11 @@ func getTorrentStarckFilmes(ctx context.Context, i *Indexer, link, referer strin
 				logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
 			}
 
+			baseTitle := strings.TrimSpace(title)
 			title := processTitle(title, magnetAudio)
+			if strings.TrimSpace(releaseTitle) == "" {
+				releaseTitle = baseTitle
+			}
 
 			// if the number of sizes is equal to the number of magnets, then assign the size to each indexed torrent in order
 			var mySize string

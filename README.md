@@ -5,6 +5,12 @@
 
 This is a simple torrent indexer that can be used to index torrents from HTML pages. It is written in Golang and uses Redis as a cache.
 
+## Documentation
+
+- [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) — architecture, endpoints, configuration and current state.
+- [SITE_STATUS.md](SITE_STATUS.md) — per-site status, known issues and validation results.
+- [RASPBERRY_PI.md](RASPBERRY_PI.md) — Raspberry Pi 4 migration notes and checklist.
+
 ## Test it
 
 Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org/) to test it.
@@ -12,19 +18,22 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 ## Supported sites
 
 - [comando-torrents](https://comando.la/)
-- [bludv](https://bludvfilmes.tv/)
+- [bludv](https://bludvfilmes2.xyz/) - **downloads are currently behind an ad gate**; automatic extraction may return no results. See [SITE_STATUS.md](SITE_STATUS.md).
 - [torrent-dos-filmes](https://torrentdosfilmes.se/)
-- [starck-filmes](https://www.starckfilmes.fans/)
-- [rede-torrent](https://redetorrent.com/)
-- [vaca-torrent](https://vacatorrentmov.com/)
+- [starck-filmes](https://starckfilmes-v27.com/)
+- [rede-torrent](https://redestorrents.com/)
+- [vaca-torrent](https://vacatorrentmov.com/) - **currently unavailable**: the domain redirects to an unrelated site. See [SITE_STATUS.md](SITE_STATUS.md).
 
 ## Deploy
 
 If you have Docker + docker-compose installed, you can deploy it using the following command:
 
 ```bash
-curl -s https://raw.githubusercontent.com/felipemarinho97/torrent-indexer/main/docker-compose.yml > docker-compose.yml
-docker-compose up -d
+git clone https://github.com/felipemarinho97/torrent-indexer.git
+cd torrent-indexer
+cp .env.example .env
+# edit .env and set MEILI_MASTER_KEY (e.g. openssl rand -base64 32)
+docker compose up -d
 ```
 
 The server will be available at [http://localhost:8080/](http://localhost:8080/).
@@ -38,9 +47,10 @@ You can configure the server using the following environment variables:
 - `LOG_LEVEL`: (optional) The log level. Default: `1` (info). 
   - Possible values: `0` (debug), `1` (info), `2` (warn), `3` (error)
 - `LOG_FORMAT`: (optional) The log format. Can be "json" or default to console logger.
-- `FLARESOLVERR_ADDRESS`: (optional) The address of the FlareSolverr instance. Default: `N/A`
-- `FLARESOLVERR_TIMEOUT_SECONDS`: (optional) Timeout for flaresolverr requests. Default: `30`
+- `FLARESOLVERR_ADDRESS`: (optional) The address of the FlareSolverr instance. Required for Cloudflare-protected indexers (`comando_torrents` and `bludv`). Default: `N/A`
+- `FLARESOLVERR_TIMEOUT_SECONDS`: (optional) Timeout for flaresolverr requests. Default: `30` (the Pi uses `180` for Comando).
 - `FLARESOLVERR_POOL_SIZE`: (optional) Number of FlareSolverr sessions in the pool. Default: `5`
+- `FLARESOLVERR_USE_SESSIONS`: (optional) Reuse FlareSolverr sessions. Default: `false`; set `true` when the official FlareSolverr solves Cloudflare more reliably with a session (the Pi uses `true`).
 - `REQUEST_TIMEOUT_MILLISECONDS`: (optional) Timeout for external scraping requests. Default: `5000`
 - `MEILISEARCH_ADDRESS`: (optional) The address of the MeiliSearch instance. Default: `N/A`
 - `MEILISEARCH_KEY`: (optional) The API key of the MeiliSearch instance. Default: `N/A`
@@ -59,6 +69,19 @@ You can configure the server using the following environment variables:
 - `MAGNET_METADATA_API_ADDRESS`: (optional) The address of your magnet metadata API. Default: `N/A`
 - `MAGNET_METADATA_API_TIMEOUT_SECONDS`: (optional) The timeout for the magnet metadata API requests in seconds. Default: `10`
 - `INDEXER_<NAME>_URL`: (optional) Set a custom URL for the indexer. Where the "NAME" will be always uppercase indexer key with underscores. ex: `INDEXER_DODO_FILMES_URL=https://my-proxied-dodo-url.org`
+- In the included `docker-compose.yml`, `MEILISEARCH_KEY` is set from `MEILI_MASTER_KEY` in your local `.env`.
+
+### Secrets and local configuration
+
+Do not commit real secrets, private IPs or WOL/MAC data.
+
+- **Root `.env`:** copy `.env.example` to `.env` and set `MEILI_MASTER_KEY` (`openssl rand -base64 32`). The same key is used by the indexer and Meilisearch.
+- **Raspberry Pi stack:** copy `deploy/raspberry/.env.example` to `.env` on the host and fill `MEILI_MASTER_KEY`, `LAN_IP`, `TAILSCALE_IP`, `ALLOWED_NETWORKS`, `PC_IP`, `PC_MAC`, `LAN_BROADCAST`, `MEDIA_ROOT` and `CONFIG_ROOT`.
+- **WOL:** the password comes from `GAMING_PASSWORD` in `.env` (outside Git). `PC_IP`/`PC_MAC`/`LAN_BROADCAST` also come from `.env`; the agent still supports `.gaming_password` as a legacy fallback.
+- `.env`, `.env.*` (except `.env.example`), `.gaming_password`, `.bazarr_key`, `requests.db`, `state/` and `*.local.md` are ignored by Git.
+- The runbooks (`PROJECT_OVERVIEW.md`, `SITE_STATUS.md`, `RASPBERRY_PI.md`, `MEDIA_STACK.md`) use placeholders such as `<LAN_IP>` and `<TAILSCALE_IP>`. The files with real values are kept locally as `*.local.md` and are ignored.
+- See **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** for the audit, false positives and key-rotation notes.
+
 ## Integrating with Jackett
 
 You can integrate this indexer with Jackett by adding a new Torznab custom indexer. Here is an example of how to do it for the `bludv` indexer:

@@ -111,6 +111,13 @@ func (i *Indexer) HandlerVacaTorrentIndexer(w http.ResponseWriter, r *http.Reque
 	// if no links were indexed, expire the document in cache
 	if len(links) == 0 {
 		_ = i.requester.ExpireDocument(ctx, targetURL)
+		if strings.Contains(strings.ToLower(doc.Find("title").Text()), "vaqueiro") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "vaca_torrent domain no longer serves the expected site (it redirects to vaqueirofilmes1.com); set INDEXER_VACA_TORRENT_URL to a working domain"})
+			i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
+			return
+		}
 	}
 
 	soraFetcher, err := utils.NewSoraLinkFetcher("https://vacadb.org", i.redis)
@@ -208,6 +215,9 @@ func postSearchVacaTorrent(ctx context.Context, i *Indexer, targetURL, query, pa
 	var ajaxResp VacaTorrentAjaxResponse
 	err = json.Unmarshal(bodyBytes, &ajaxResp)
 	if err != nil {
+		if strings.Contains(strings.ToLower(string(bodyBytes)), "vaqueiro") {
+			return nil, fmt.Errorf("vaca_torrent domain no longer serves the expected site (it redirects to vaqueirofilmes1.com); set INDEXER_VACA_TORRENT_URL to a working domain")
+		}
 		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 

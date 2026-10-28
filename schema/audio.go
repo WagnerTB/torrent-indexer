@@ -10,16 +10,24 @@ const (
 	AudioPortuguese3 = "PT-BR"
 	AudioPortuguese4 = "Dublado"
 	AudioPortuguese5 = "Nacional"
+	AudioPortuguese6 = "PT"
+	AudioPortuguese7 = "BR"
 	AudioEnglish     = "Inglês"
 	AudioEnglish2    = "Ingles"
+	AudioEnglish3    = "EN"
 	AudioSpanish     = "Espanhol"
+	AudioSpanish2    = "ES"
 	AudioFrench      = "Francês"
 	AudioFrench2     = "Frances"
+	AudioFrench3     = "FR"
 	AudioGerman      = "Alemão"
 	AudioGerman2     = "Alemao"
+	AudioGerman3     = "DE"
 	AudioItalian     = "Italiano"
+	AudioItalian2    = "IT"
 	AudioJapanese    = "Japonês"
 	AudioJapanese2   = "Japones"
+	AudioJapanese3   = "JP"
 	AudioKorean      = "Coreano"
 	AudioMandarin    = "Mandarim"
 	AudioMandarin2   = "Chinês"
@@ -27,6 +35,7 @@ const (
 	AudioCantonese   = "Cantonês"
 	AudioCantonese2  = "Cantones"
 	AudioRussian     = "Russo"
+	AudioRussian2    = "RU"
 	AudioSwedish     = "Sueco"
 	AudioSwedish2    = "Suéco"
 	AudioSerbian     = "Sérvio"
@@ -76,16 +85,24 @@ var AudioList = []Audio{
 	AudioPortuguese3,
 	AudioPortuguese4,
 	AudioPortuguese5,
+	AudioPortuguese6,
+	AudioPortuguese7,
 	AudioEnglish,
 	AudioEnglish2,
+	AudioEnglish3,
 	AudioSpanish,
+	AudioSpanish2,
 	AudioFrench,
 	AudioFrench2,
+	AudioFrench3,
 	AudioGerman,
 	AudioGerman2,
+	AudioGerman3,
 	AudioItalian,
+	AudioItalian2,
 	AudioJapanese,
 	AudioJapanese2,
+	AudioJapanese3,
 	AudioKorean,
 	AudioMandarin,
 	AudioMandarin2,
@@ -93,6 +110,7 @@ var AudioList = []Audio{
 	AudioCantonese,
 	AudioCantonese2,
 	AudioRussian,
+	AudioRussian2,
 	AudioSwedish,
 	AudioSwedish2,
 	AudioSerbian,
@@ -161,25 +179,41 @@ func (a Audio) toTag() string {
 		return "brazilian"
 	case AudioPortuguese5:
 		return "brazilian"
+	case AudioPortuguese6:
+		return "brazilian"
+	case AudioPortuguese7:
+		return "brazilian"
 	case AudioEnglish:
 		return "eng"
 	case AudioEnglish2:
 		return "eng"
+	case AudioEnglish3:
+		return "eng"
 	case AudioSpanish:
+		return "spa"
+	case AudioSpanish2:
 		return "spa"
 	case AudioFrench:
 		return "fra"
 	case AudioFrench2:
 		return "fra"
+	case AudioFrench3:
+		return "fra"
 	case AudioGerman:
 		return "deu"
 	case AudioGerman2:
 		return "deu"
+	case AudioGerman3:
+		return "deu"
 	case AudioItalian:
+		return "ita"
+	case AudioItalian2:
 		return "ita"
 	case AudioJapanese:
 		return "jpn"
 	case AudioJapanese2:
+		return "jpn"
+	case AudioJapanese3:
 		return "jpn"
 	case AudioKorean:
 		return "kor"
@@ -194,6 +228,8 @@ func (a Audio) toTag() string {
 	case AudioCantonese2:
 		return "yue"
 	case AudioRussian:
+		return "rus"
+	case AudioRussian2:
 		return "rus"
 	case AudioSwedish:
 		return "swe"
