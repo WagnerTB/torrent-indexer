@@ -20,3 +20,7 @@ state/
 /torrent-indexer-linux-arm64
 /torrent-indexer-linux-arm64-new
 /dist/
+
+# Homepage custom.js build
+deploy/homepage/node_modules/
+deploy/homepage/dist/

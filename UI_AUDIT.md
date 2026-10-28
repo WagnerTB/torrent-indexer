@@ -1,10 +1,10 @@
-# Auditoria de Interface — Home, Pedidos e Legendas
+# Auditoria de Interface — Início, Pedidos e Legendas
 
 > **Nota:** IPs/caminhos de deploy foram substituídos por placeholders.
 
 - **Data:** 2026-10-27
-- **Status:** análise concluída; **nenhuma alteração de código feita nesta auditoria** (o painel de armazenamento implementado antes permanece)
-- **Escopo:** Home, Pedidos (Ativos/Histórico), Legendas, modal de episódios, painel de armazenamento
+- **Status:** etapas **1, 0.5, 2, 3, 4 e 5 concluídas em 2026-10-28**; próximas etapas = **6 (acessibilidade)** e **7 (testes finais)**. O `custom.js` agora é buildado de `deploy/homepage/src`.
+- **Escopo:** Início, Pedidos (Ativos/Histórico), Legendas, modal de episódios, painel de armazenamento
 - **Método:** inspeção do `custom.js`, `media_agent.py` e configs do Homepage; Chrome headless em 1400×2200 e 390×844; chamadas reais a `/arr/pending`, `/requests`, `/storage` e `/subs/quota`; capturas de tela dos estados ativos, histórico, Legendas, mobile e modal de episódios.
 
 ## 1. Resumo executivo
@@ -88,7 +88,7 @@ Legenda de prioridade: **P0** = bloqueia/atrapalha muito o usuário novo ou envo
 
 ## 4. Etapas propostas
 
-> Nenhuma etapa abaixo foi iniciada. A ordem é uma sugestão; a Etapa 1 é a de melhor relação esforço/impacto.
+> Etapas **1, 0.5, 2, 3, 4 e 5 concluídas** (2026-10-28). A ordem executada foi **1 → 0.5 → 2 → 3 → 4 → 5**; faltam **6 → 7**. O estado detalhado de implementação está no topo do documento e no checklist da seção 8.
 
 ### Etapa 0 — Registro e validação (concluída)
 
@@ -100,6 +100,8 @@ Legenda de prioridade: **P0** = bloqueia/atrapalha muito o usuário novo ou envo
 **Critério de aceite:** documento revisado e etapas aprovadas.
 
 ### Etapa 0.5 — Modularização preparatória (habilitador)
+
+**Status:** concluída em 2026-10-28. Fonte em `deploy/homepage/src`, build esbuild para um IIFE clássico e paridade validada.
 
 Objetivo: separar o `custom.js` em módulos por feature, **sem mudar comportamento**, antes das mudanças grandes.
 
@@ -116,7 +118,7 @@ Objetivo: separar o `custom.js` em módulos por feature, **sem mudar comportamen
 - **Opções de build:**
   - **A (recomendada):** ES modules + `esbuild --bundle --format=iife --target=es2020` (dev dependency só no diretório do homepage).
   - **B:** IIFEs com namespace `window.__hx` + script de concatenação sem dependências.
-- **Teste de paridade antes/depois:** screenshots 1400/390 de Home/Pedidos/Legendas, modal, histórico, storage e WOL (sem acionar), console sem erros, comparação de textos/classes.
+- **Teste de paridade antes/depois:** screenshots 1400/390 de Início/Pedidos/Legendas, modal, histórico, storage e WOL (sem acionar), console sem erros, comparação de textos/classes.
 - **Deploy igual:** copiar o `custom.js` gerado para `<MEDIA_ROOT>/docker/homepage/custom.js`; hard refresh no navegador.
 - **Não misturar correções de comportamento nesta etapa**; ela é behavior-preserving.
 
@@ -125,6 +127,8 @@ Objetivo: separar o `custom.js` em módulos por feature, **sem mudar comportamen
 **Quando fazer (confirmado):** **depois da Etapa 1** (quick wins primeiro), antes das features grandes (2–6). A Etapa 1 é quase toda texto/feedback simples; a modularização vem em seguida, antes de onboarding/mobile/modal/histórico.
 
 ### Etapa 1 — Quick wins de texto, semântica e feedback
+
+**Status:** concluída em 2026-10-28.
 
 Objetivo: eliminar o que parece “inacabado” e evitar mensagens contraditórias, sem mexer em layout.
 
@@ -143,6 +147,8 @@ Objetivo: eliminar o que parece “inacabado” e evitar mensagens contraditóri
 **Critério de aceite:** nenhuma string “? / episodio / Concluido / Nao / Backfill / [pb]” visível nos fluxos principais; nenhuma mensagem contraditória no histórico; botões indicam carregamento e não aceitam clique duplo; zero erros de JS.
 
 ### Etapa 2 — Onboarding e descoberta
+
+**Status:** concluída em 2026-10-28.
 
 Objetivo: um usuário novo entender o sistema sem perguntar.
 
@@ -165,6 +171,8 @@ Objetivo: um usuário novo entender o sistema sem perguntar.
 
 ### Etapa 3 — Densidade mobile
 
+**Status:** concluída em 2026-10-28.
+
 Objetivo: conteúdo acima da dobra e menos rolagem antes da lista.
 
 - Recolher/compactar os widgets CPU/memória/busca/hora nas abas Pedidos/Legendas (não remover o relógio/busca sem confirmar).
@@ -176,6 +184,8 @@ Objetivo: conteúdo acima da dobra e menos rolagem antes da lista.
 **Critério de aceite:** em 390×844, o primeiro item de conteúdo aparece acima de ~400 px; toolbar com no máximo 3 linhas; sem overflow horizontal; alvos de toque ≥40 px nos controles principais.
 
 ### Etapa 4 — Modal de episódios e ações de risco
+
+**Status:** concluída em 2026-10-28.
 
 Objetivo: achar e pedir um episódio específico sem rolar 14 mil pixels nem selecionar centenas por acidente.
 
@@ -191,6 +201,8 @@ Objetivo: achar e pedir um episódio específico sem rolar 14 mil pixels nem sel
 
 ### Etapa 5 — Histórico mais claro
 
+**Status:** concluída em 2026-10-28. Datas Seerr-only usam `updatedAt` como aproximado e “concluído sem data” quando ausente; filtros contextuais (chips + select) e filtro por origem; “Apagar arquivados carregados” mantido; auto-refresh pausado. Estado de sub-aba/filtros na URL **não** implementado (opcional).
+
 Objetivo: transformar o histórico em algo escaneável e sem contradições.
 
 - Layout compacto/accordion com colunas: data, título, tipo, status, origem, ações.
@@ -205,6 +217,8 @@ Objetivo: transformar o histórico em algo escaneável e sem contradições.
 
 ### Etapa 6 — Acessibilidade e polimento
 
+**Status:** pendente.
+
 - Sub-abas com `role=tablist/tab/tabpanel` (ou `aria-pressed` consistente).
 - Barras com `role="progressbar"`/`aria-valuenow`.
 - Modal com `role="dialog"`, `aria-modal`, foco preso e retorno de foco.
@@ -217,6 +231,8 @@ Objetivo: transformar o histórico em algo escaneável e sem contradições.
 **Critério de aceite:** navegação por teclado nas sub-abas e no modal; leitor de tela anuncia status/toast; contraste mínimo AA nos textos principais; sem regressão visual nos temas.
 
 ### Etapa 7 — Reavaliação e testes finais
+
+**Status:** pendente.
 
 - Reexecutar Chrome headless em 1400×2200 e 390×844.
 - Testar teclado, foco, modal, filtros, empty/error states.
@@ -395,18 +411,18 @@ Ordem confirmada: **1 → 0.5 → 2 → 3 → 4 → 5 → 6 → 7** (quick wins 
 - [x] Fonte de verdade/versionamento definidos: **repo (`deploy/homepage/src`) + artefato no Pi**.
 - [x] Granularidade do `orders` definida: **dividir em active/history/episodes/add**.
 - [x] Etapa 1 (quick wins) aprovada.
-- [ ] Etapa 2 (onboarding/Seerr) aprovada.
-- [ ] Etapa 3 (mobile) aprovada.
-- [ ] Etapa 4 (modal de episódios) aprovada.
-- [ ] Etapa 5 (histórico) aprovada.
+- [x] Etapa 2 (onboarding/Seerr) aprovada e concluída.
+- [x] Etapa 3 (mobile) aprovada e concluída.
+- [x] Etapa 4 (modal de episódios) aprovada e concluída.
+- [x] Etapa 5 (histórico) aprovada e concluída.
 - [ ] Etapa 6 (acessibilidade/polimento) aprovada.
-- [ ] Datas Seerr-only definidas (F-09/F-10).
-- [ ] Filtros definidos (F-36).
-- [ ] Ajuda do WOL definida (F-37).
-- [ ] “Como funciona” cobre modo remoto, escopo dublado, Pedidos vs Legendas e início do histórico (F-38/F-39).
+- [x] Datas Seerr-only definidas (F-09/F-10): `updatedAt` aproximado; “sem data” quando ausente.
+- [x] Filtros definidos (F-36): chips + select contextual; origem separada no Histórico.
+- [x] Ajuda do WOL definida (F-37).
+- [x] “Como funciona” cobre modo remoto, escopo dublado, Pedidos vs Legendas e início do histórico (F-38/F-39).
 - [ ] Decisões da seção 6 confirmadas.
-- [ ] Podemos iniciar pela etapa: `______`.
+- [x] Etapas 1, 0.5, 2, 3, 4 e 5 concluídas. Próxima: **6 — Acessibilidade e polimento**.
 
 ---
 
-**Observação:** este documento é a fonte de verdade do plano. Nenhuma alteração de interface foi feita **nesta etapa de análise**; o painel de armazenamento anterior permanece. Ao iniciar cada etapa, marcar os itens e registrar a data.
+**Observação:** este documento é a fonte de verdade do plano. As etapas 1, 0.5, 2, 3, 4 e 5 foram implementadas e publicadas em 2026-10-28; o painel de armazenamento anterior permanece. Registre a data ao concluir cada etapa restante.

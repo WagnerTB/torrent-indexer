@@ -233,23 +233,39 @@ git clone https://github.com/felipemarinho97/torrent-indexer.git
 cd torrent-indexer
 ```
 
-Edite o `docker-compose.yml` com:
+Para o stack completo, use o template versionado em `deploy/raspberry/` em vez
+do compose da raiz:
 
-- volumes `redis-data` e `meili-data`;
-- `FLARESOLVERR_POOL_SIZE=2`;
-- `REQUEST_TIMEOUT_MILLISECONDS=10000` se necessário;
-- `TZ=America/Sao_Paulo` se desejar.
+```bash
+mkdir -p <STACK_ROOT>/torrent-indexer
+cp deploy/raspberry/docker-compose.yml <STACK_ROOT>/
+cp deploy/raspberry/.env.example <STACK_ROOT>/.env
+```
+
+O template já traz volumes `redis-data` e `meili-data`, limites de memória,
+FlareSolverr com 1024 MB/`shm_size: 1gb`, timeout de 180s e os bindings de
+gestão no IP da LAN. Preencha o `.env` (`MEILI_MASTER_KEY`, `LAN_IP`,
+`TAILSCALE_IP`, `ALLOWED_NETWORKS`, `MEDIA_ROOT`, `CONFIG_ROOT`, `PC_IP`,
+`PC_MAC`, `LAN_BROADCAST`, `GAMING_PASSWORD`). O passo a passo completo está em
+[SETUP.md](SETUP.md#4-caminho-b--stack-completa-no-raspberry-pi).
 
 ### 4.4 Build e subida
 
-No Pi:
+Build do binário arm64 no PC (recomendado) ou no Pi:
 
 ```bash
-docker compose build
-docker compose up -d
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o torrent-indexer-linux-arm64 .
 ```
 
-Ou, se buildou no PC:
+Copie o binário para o layout esperado e suba:
+
+```bash
+cp torrent-indexer-linux-arm64 <STACK_ROOT>/torrent-indexer/
+cd <STACK_ROOT>
+docker compose up -d --build
+```
+
+Se você buildou a imagem em vez do binário:
 
 ```bash
 gunzip -c /tmp/torrent-indexer-arm64.tar.gz | docker load
@@ -589,7 +605,8 @@ docker compose down              # derruba a stack inteira
   tem segredo.
 - O Bazarr está com CORS habilitado para o dashboard. O **gaming-agent** tem o
   8099 privado (LAN) e o 8098 público, que só expõe `/gaming/status` (sem
-  IP/MAC) e `/gaming/wake` com senha em `.gaming_password` (5 falhas/min).
+  IP/MAC) e `/gaming/wake` com senha em `GAMING_PASSWORD` no `.env` (5
+  falhas/min); `.gaming_password` é fallback legado.
   O **media-agent** (`8097`, sem auth) pode alterar perfis, adicionar séries,
   monitorar episódios e acessar o Bazarr; ele só aceita LAN e Tailscale via
   `ALLOWED_NETWORKS`.

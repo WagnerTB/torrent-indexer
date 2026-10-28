@@ -1,0 +1,12 @@
+{
+  "name": "homepage-custom",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=iife --target=es2020 --charset=utf8 --outfile=dist/custom.js",
+    "check": "node --check dist/custom.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

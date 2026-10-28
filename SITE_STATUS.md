@@ -224,8 +224,9 @@ Teste realizado com `FLARESOLVERR_ADDRESS=http://<LAN_IP>.1:8191`
   específicos. Os grupos do dashboard são Filmes e Séries, Media Services
   Status e Gaming.
 - WOL remoto: o card PC Casa usa `:8098/gaming/status` e `:8098/gaming/wake`;
-  a senha fica em `<MEDIA_ROOT>/docker/gaming-agent/.gaming_password` e o WOL
-  exige `X-Gaming-Password` (5 falhas/min). O 8099 privado continua LAN-only.
+  a senha vem de `GAMING_PASSWORD` no `.env` e o WOL exige
+  `X-Gaming-Password` (5 falhas/min); `.gaming_password` é fallback legado. O
+  8099 privado continua LAN-only.
 - A chave do Bazarr saiu do `custom.js`; a aba Legendas usa o proxy
   `/bazarr` do media-agent e a chave fica em
   `<MEDIA_ROOT>/docker/media-agent/.bazarr_key`.

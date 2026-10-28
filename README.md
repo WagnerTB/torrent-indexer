@@ -7,9 +7,14 @@ This is a simple torrent indexer that can be used to index torrents from HTML pa
 
 ## Documentation
 
+- **[SETUP.md](SETUP.md)** — step-by-step setup for a new machine: local indexer, Raspberry Pi stack, secrets, and the Homepage build.
 - [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) — architecture, endpoints, configuration and current state.
+- [MEDIA_STACK.md](MEDIA_STACK.md) — media stack on the Pi (Radarr/Sonarr/Prowlarr/Bazarr/Jellyfin/Seerr/Homepage/agents).
 - [SITE_STATUS.md](SITE_STATUS.md) — per-site status, known issues and validation results.
 - [RASPBERRY_PI.md](RASPBERRY_PI.md) — Raspberry Pi 4 migration notes and checklist.
+- [deploy/homepage/README.md](deploy/homepage/README.md) — Homepage `custom.js` source, build and deploy.
+- [UI_AUDIT.md](UI_AUDIT.md) — UI plan, decisions and implementation status.
+- [SECURITY_AUDIT.md](SECURITY_AUDIT.md) — security audit, secrets handling and rotation notes.
 
 ## Test it
 
@@ -26,17 +31,24 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 
 ## Deploy
 
-If you have Docker + docker-compose installed, you can deploy it using the following command:
+For the full walkthrough (local, Raspberry Pi, secrets, Homepage), see
+**[SETUP.md](SETUP.md)**.
+
+If you have Docker + Docker Compose installed, the indexer-only stack is:
 
 ```bash
 git clone https://github.com/felipemarinho97/torrent-indexer.git
 cd torrent-indexer
 cp .env.example .env
 # edit .env and set MEILI_MASTER_KEY (e.g. openssl rand -base64 32)
-docker compose up -d
+docker compose up -d --build
 ```
 
 The server will be available at [http://localhost:8080/](http://localhost:8080/).
+The root compose is intentionally simple (no persistent volumes). For the
+Raspberry Pi media stack with persistent volumes and memory limits, use the
+template in [deploy/raspberry/](deploy/raspberry/) and follow
+[SETUP.md](SETUP.md#4-caminho-b--stack-completa-no-raspberry-pi).
 
 ## Configuration
 

@@ -106,6 +106,8 @@ Componentes principais:
 api/                 Handlers HTTP e regras de cada site
 cache/               Redis
 consts/              Versão/build
+deploy/homepage/     Fonte modular + build do custom.js do Homepage
+deploy/raspberry/    Template do stack completo no Pi (compose, env, systemd)
 logging/             Logs
 magnet/              Magnet/infohash
 monitoring/          Prometheus
@@ -117,10 +119,15 @@ scripts/             Scripts de verificação
 search/              Meilisearch
 utils/               Utilidades
 main.go              Entrada da aplicação
-docker-compose.yml   Stack local
+docker-compose.yml   Stack local do indexer
 Dockerfile           Build da imagem
+SETUP.md             Guia de instalação para uma pessoa nova
+PROJECT_OVERVIEW.md  Arquitetura, endpoints e configuração
+MEDIA_STACK.md       Stack de mídia no Pi
 SITE_STATUS.md       Status dos sites e testes
-RASPBERRY_PI.md      Migração para Raspberry Pi
+RASPBERRY_PI.md      Migração/operação no Raspberry Pi
+UI_AUDIT.md          Plano e status das etapas de UI
+SECURITY_AUDIT.md    Auditoria e rotação de segredos
 ```
 
 ## 5. Endpoints
@@ -259,6 +266,9 @@ Limitações:
 
 ## 12. Como rodar e testar
 
+Para instalação do zero (Docker, Pi, segredos e Homepage), siga
+[SETUP.md](SETUP.md). Resumo de desenvolvimento:
+
 Desenvolvimento:
 
 ```bash
@@ -328,18 +338,20 @@ com `&` e `%20`.
   `<LAN_IP>` (LAN). O Homepage detecta o host: no modo remoto esconde os
   cards de gestão, mas mantém PC Casa e as abas Pedidos/Legendas.
 - O WOL fica no card **PC Casa**: no modo local usa o 8099 sem senha; no modo
-  remoto usa o 8098 e pede a senha de `.gaming_password`.
+  remoto usa o 8098 e pede a senha definida em `GAMING_PASSWORD` no `.env`
+  (`.gaming_password` é fallback legado).
 - Jellyfin: o realtime não funciona no mount FUSE/NTFS-3G; o scan agendado roda
   a cada 30 min e o hook **Jellyfin Refresh** no Radarr/Sonarr atualiza o item
   na hora após import/upgrade/rename.
 - Perfis dublados (Radarr `Animação - Dublado` e Sonarr `Séries - Dublado`)
   exigem PT-BR desde 2026-10-26 (mínimo 100) e rejeitam `Latino/Espanhol`.
-  O Homepage tem abas no topo **Home**, **Pedidos** e **Legendas**; a aba
+  O Homepage tem abas no topo **Início**, **Pedidos** e **Legendas**; a aba
   Pedidos cruza os perfis dublados com os pedidos do Seerr (pendente,
   aprovado, recusado ou falhou), verifica releases PT-BR e permite trocar para
   o perfil Original e buscar quando não houver. Também busca séries/animes no
   Sonarr, adiciona com o perfil escolhido sem monitorar tudo e permite marcar e
-  buscar episódios específicos.
+  buscar episódios específicos. O `custom.js` é buildado a partir de
+  `deploy/homepage/src` (ver [deploy/homepage/README.md](deploy/homepage/README.md)).
 
 ## 14. Alterações recentes no working tree
 
@@ -370,13 +382,18 @@ Arquivos importantes alterados/adicionados nesta etapa:
   `shm_size: 1gb`, timeout 180s, modo de sessão, `media-gateway` e bindings de
   gestão no IP `<LAN_IP>`;
 - `SITE_STATUS.md`, `PROJECT_OVERVIEW.md`, `RASPBERRY_PI.md`;
-- `MEDIA_STACK.md` (novo) — stack de mídia, perfis, legendas e pendências.
+- `MEDIA_STACK.md` (novo) — stack de mídia, perfis, legendas e pendências;
+- `deploy/homepage/` — fonte modular, `package.json`, build esbuild e README;
+- `SETUP.md` — guia de instalação para uma pessoa nova;
+- `UI_AUDIT.md` e `SECURITY_AUDIT.md` — plano/status da UI e auditoria de
+  segurança.
 
 No Pi, também foram atualizados (fora do Git): `gaming-agent/agent.py` (só
 WOL/status, 8099 privada/8098 pública), `media-agent/media_agent.py` (Pedidos e
 Legendas: `/arr/*`, `/sonarr/*`, `/bazarr`, quota, porta 8097),
-`media-gateway/gateway.py` (proxy Torznab), `.bazarr_key`, `.gaming_password` e
-o `custom.js` do Homepage (modo local/remoto, sem segredos).
+`media-gateway/gateway.py` (proxy Torznab), `.bazarr_key`, `GAMING_PASSWORD` no
+`.env` e o `custom.js` do Homepage (modo local/remoto, sem segredos). O fonte do
+`custom.js` está em `deploy/homepage/src` e o artefato é gerado com esbuild.
 
 O compose vivo do Pi em `<STACK_ROOT>/docker-compose.yml` ganhou
 `radarr`, `seerr`, `homepage`, `gaming-agent`, `media-agent` e `media-gateway`;
@@ -420,6 +437,8 @@ Também existem binários não rastreados na raiz (`torrent-indexer.exe`,
 
 O detalhamento do stack de mídia (Jellyfin, Bazarr, Radarr, Sonarr, Prowlarr,
 Seerr, Homepage, gaming-agent, media-agent, media-gateway), caminhos, perfis, legendas,
-quota e pendências está em [MEDIA_STACK.md](MEDIA_STACK.md).
+quota e pendências está em [MEDIA_STACK.md](MEDIA_STACK.md). A fonte do painel
+do Homepage fica em `deploy/homepage/src`; o build e o deploy estão em
+[deploy/homepage/README.md](deploy/homepage/README.md).
 
 

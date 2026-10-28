@@ -411,44 +411,60 @@ Bazarr em `http://<LAN_IP>:6767`, config
 
 - URL LAN: `http://<LAN_IP>:3000`.
 - URL Tailscale: `http://<TAILSCALE_IP>:3000`.
-- Config: `<MEDIA_ROOT>/docker/homepage/{settings,services,widgets,bookmarks}.yaml`
+- Config viva: `<MEDIA_ROOT>/docker/homepage/{settings,services,widgets,bookmarks}.yaml`
   e `custom.js`.
+- **Fonte do painel:** `deploy/homepage/src` (módulos ES). O `custom.js` do Pi é
+  artefato de build; não edite o arquivo no servidor. Build:
+  `cd deploy/homepage && npm install && npm run build`; o resultado é
+  `dist/custom.js`. Detalhes em
+  [deploy/homepage/README.md](deploy/homepage/README.md).
 - Grupos: Filmes e Séries (Jellyfin, Stremio, Seerr), Media Services Status
   (Radarr, Sonarr, Prowlarr, Bazarr, qBittorrent), Gaming (PC Casa). O card do
   torrent-indexer foi removido do dashboard; o serviço continua rodando e
   exposto em `:8080`. O estilo e as colunas de cada grupo ficam em
   `settings.yaml` (`layout`), que também define a ordem dos grupos.
 - `custom.js` adiciona:
-  - barra de abas fixa no topo: **Home**, **Pedidos** e **Legendas**. A barra
+  - barra de abas fixa no topo: **Início**, **Pedidos** e **Legendas**. A barra
     acompanha a largura do conteúdo e fica no topo também no celular;
-  - **Home** mantém os cards, widgets e busca exatamente como estão;
+  - **Início** mantém os cards, widgets e busca exatamente como estão;
   - **Pedidos** e **Legendas** mantêm o cabeçalho/widgets/busca no topo e
     escondem cards, bookmarks e rodapé para usar a área principal da página;
-  - URLs por query string: `/?tab=pedidos` e `/?tab=legendas` (Home é `/`).
+  - URLs por query string: `/?tab=pedidos` e `/?tab=legendas` (Início é `/`).
     Funcionam ao recarregar, compartilhar e no botão voltar. O Homepage não
     tem rotas `/pedidos` e `/legendas` — elas retornam 404 —, por isso não são
     usados caminhos reais sem um proxy na frente;
-  - aba **Pedidos** (perfis dublados + Seerr): contadores por status, filtro
-    por situação (inclui **No Seerr**) e busca por título. Cada filme/série
-    mostra se está baixado, parcial, baixando, na fila, procurando, com erro ou
-    sem arquivo, além de progresso, tempo restante e último evento do
-    Radarr/Sonarr. Pedidos do Seerr pendentes/aprovados que ainda não chegaram
-    ao Radarr/Sonarr aparecem com o status do Seerr e o perfil solicitado;
-    pedidos recusados ou que falharam mostram o erro de forma explícita.
+  - bloco recolhível **Como funciona** em Pedidos e Legendas;
+  - aba **Pedidos** (perfis dublados + Seerr): contadores por status, filtros
+    contextuais (o select muda entre Ativos e Histórico), busca por título e
+    **Abrir Seerr**. Cada filme/série mostra status, progresso, tempo restante
+    e último evento. Pedidos do Seerr que ainda não chegaram ao Radarr/Sonarr
+    aparecem com o status/perfil do Seerr; recusados/falhos mostram o erro.
     O botão **Adicionar série/anime** busca no Sonarr/TVDB, mostra se a série
-    já existe e permite escolher perfil (Original, Anime - Japonês ou
-    Séries - Dublado), pasta raiz e tipo; ao adicionar, nada é monitorado, e o
-    painel lista temporadas/episódios para marcar só os desejados e buscar
-    apenas esses;
+    já existe e permite escolher **Perfil**, **Pasta raiz** e **Tipo**: ao
+    adicionar, nada é monitorado, e o modal de episódios permite escolher o que
+    monitorar/buscar;
+  - **Histórico**: layout compacto com data, título, tipo, origem, status,
+    conclusão e ações; badges **Ativo/Arquivado**; filtro por origem
+    (Seerr/Manual/Importado do Sonarr/Radarr-Sonarr); datas de pedidos
+    Seerr-only marcadas como **(aprox.)** quando há `updatedAt` e
+    **“concluído sem data”** quando não há; “Apagar arquivados carregados”
+    mantém o escopo explícito; auto-refresh pausado para não perder
+    paginação/scroll;
+  - **Modal de episódios**: temporadas recolhíveis, seletor **Ir para
+    temporada**, busca por número/título, filtro **Somente monitorados** /
+    **Somente sem arquivo**, escopo de **Marcar não baixados**, confirmação
+    com contagem e badge **Pedido** nos episódios já rastreados; acima de 20
+    episódios o **Aplicar** também pede confirmação;
+  - **Buscar original** pede confirmação explícita (muda para o perfil Original
+    e o item sai dos perfis dublados);
   - aba **Legendas**: quota da OpenSubtitles, busca por série ou episódio,
     agrupamento por série, pendências, fila local (`localStorage`), feedback
     do Bazarr e sincronização de legendas existentes;
-  - verificação de releases PT-BR no Radarr/Sonarr e **Buscar original**
-    quando não há PT-BR aceito;
+  - verificação de releases PT-BR no Radarr/Sonarr;
   - botão **Ligar PC** dentro do card **PC Casa** (status/WOL).
 - `custom.js` detecta o host:
   - acessado por `<LAN_IP>`, `localhost` ou `127.0.0.1` = **modo local**:
-    todos os cards, as abas Home/Pedidos/Legendas e o Gaming; o WOL usa o 8099
+    todos os cards, as abas Início/Pedidos/Legendas e o Gaming; o WOL usa o 8099
     privado, sem senha.
   - acessado por `<TAILSCALE_IP>` (ou outro host) = **modo remoto**: esconde os
     cards de gestão (Radarr, Sonarr, Bazarr, Prowlarr, qBittorrent), o grupo
@@ -456,14 +472,15 @@ Bazarr em `http://<LAN_IP>:6767`, config
     **PC Casa/Gaming** e as abas **Pedidos** e **Legendas**. Essas abas usam o
     `media-agent` em `http://<host-atual>:8097`.
     O botão **Ligar PC** usa o endpoint público `:8098/gaming/wake` e pede a
-    senha (`.gaming_password`); o status vem de `:8098/gaming/status` sem
-    IP/MAC.
+    senha definida em `GAMING_PASSWORD` no `.env`; o status vem de
+    `:8098/gaming/status` sem IP/MAC.
 - Links: os serviços de gestão usam `http://<LAN_IP>:<porta>`; os remotos
   (Jellyfin/Seerr/Stremio) são reescritos pelo `custom.js` para o host
   atual. `siteMonitor` e widgets internos continuam usando nomes de container
   (`jellyfin:8096`, `sonarr:8989`, etc.).
 - A barra de busca do topo é `provider: custom` apontando para a busca do
-  Seerr; não é uma busca web genérica.
+  Seerr; não é uma busca web genérica. O placeholder é ajustado para
+  **“Buscar no Seerr...”** pelo `custom.js`.
 - A chave do Bazarr saiu do `custom.js`: o painel Legendas usa o proxy
   `/bazarr` do media-agent, que guarda a chave em `.bazarr_key` no servidor.
   As chaves restantes ficam no `services.yaml` e são usadas pelo servidor do
@@ -476,8 +493,8 @@ Bazarr em `http://<LAN_IP>:6767`, config
 
 - Container `gaming-agent` (host network), só WOL/status: `8099` privado
   (**LAN only**, `LISTEN_HOST=<LAN_IP>`) e `8098` público (LAN + Tailscale).
-- Script: `<MEDIA_ROOT>/docker/gaming-agent/agent.py`; monta apenas o diretório
-  `/app` (`.gaming_password`). Não acessa mais Bazarr, Radarr, Sonarr ou Seerr.
+- Script: `<MEDIA_ROOT>/docker/gaming-agent/agent.py` (fora do Git); monta
+  apenas o diretório `/app`. Não acessa Bazarr, Radarr, Sonarr ou Seerr.
 - Endpoints:
   - `GET /status`: ping em `PC_IP` (Tailscale `<PC_TAILSCALE_IP>` e LAN
     `<PC_LAN_IP>`) e retorna `online`, `status`, `ips`, `mac`, `checked_at`.
@@ -486,12 +503,12 @@ Bazarr em `http://<LAN_IP>:6767`, config
     `<PUBLIC_IP>`.
 - O 8098 é público (LAN + Tailscale) e só aceita:
   - `GET /gaming/status`: `online`, `status`, `checked_at` (sem IP/MAC);
-  - `POST /gaming/wake`: exige `X-Gaming-Password`; a senha fica em
-    `.gaming_password` (`GAMING_PASSWORD_FILE`), com limite de 5 falhas/min.
-- A senha pode ser trocada editando
-  `<MEDIA_ROOT>/docker/gaming-agent/.gaming_password`; o agente lê a cada
-  request, sem reiniciar. O navegador guarda a senha em `sessionStorage` depois
-  do primeiro WOL bem-sucedido.
+  - `POST /gaming/wake`: exige `X-Gaming-Password`; a senha vem de
+    `GAMING_PASSWORD` no `.env`, com limite de 5 falhas/min.
+- Para trocar a senha, edite `GAMING_PASSWORD` no `.env` e recrie/restart o
+  container do `gaming-agent`. O navegador guarda a senha em `sessionStorage`
+  depois do primeiro WOL bem-sucedido. `.gaming_password` é apenas fallback
+  legado (`GAMING_PASSWORD_FILE`).
 - O PC precisa de Wake-on-LAN habilitado na BIOS/placa e, de preferência, cabo
   Ethernet.
 - `network_mode: host` + `cap_add: NET_RAW` no compose.
@@ -504,7 +521,9 @@ Bazarr em `http://<LAN_IP>:6767`, config
   (`LISTEN_HOST=0.0.0.0`). O `ALLOWED_NETWORKS` aceita LAN
   (`<LAN_SUBNET>`), Tailscale (`<TAILSCALE_RANGE>` e `<TAILSCALE_IPV6_RANGE>`) e
   loopback; fora disso retorna 403.
-- Script: `<MEDIA_ROOT>/docker/media-agent/media_agent.py`; monta o
+- Script: `<MEDIA_ROOT>/docker/media-agent/media_agent.py` (fora do Git; o
+  `deploy/raspberry/docker-compose.yml` espera esse arquivo em
+  `${CONFIG_ROOT}/media-agent`); monta o
   `config.yaml` do Bazarr, os `config.xml` de Radarr/Sonarr, o config do Seerr
   (`/seerr/settings.json`) e a chave `<MEDIA_ROOT>/docker/media-agent/.bazarr_key`
   (`BAZARR_KEY_FILE`). As API keys nunca vão para o navegador.
@@ -634,7 +653,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
   Homepage, não pelo navegador.
 - O gaming-agent tem dois listeners, só de WOL/status: o 8099 privado (LAN,
   sem auth) e o 8098 público, que expõe `/gaming/status` (sem IP/MAC) e
-  `/gaming/wake` (senha em `.gaming_password`, limite de 5 falhas/min).
+  `/gaming/wake` (senha em `GAMING_PASSWORD` no `.env`, limite de 5 falhas/min).
 - O media-agent (`8097`) aceita LAN e Tailscale via `ALLOWED_NETWORKS` e não
   tem autenticação: ele pode alterar perfis, adicionar séries, monitorar
   episódios e acessar o Bazarr. Trate o tailnet como confiável; para exposição
@@ -674,6 +693,8 @@ Bazarr em `http://<LAN_IP>:6767`, config
    alterados no working tree; revisar e commitar.
 9. **Compose versionado**: o `deploy/raspberry/docker-compose.yml` foi
    atualizado em 2026-10-26; manter sincronizado com o compose vivo.
+10. **UI**: etapas 1, 0.5, 2, 3, 4 e 5 concluídas; faltam 6 (acessibilidade) e
+    7 (testes finais). O estado da sub-aba/filtros na URL segue opcional.
 10. Itens órfãos de `/media/downloads` e `/media/docker` no banco do Jellyfin;
     limpar se aparecerem.
 11. **Acesso externo**: Homepage e serviços já usam o IP Tailscale
@@ -791,5 +812,5 @@ curl -s -H "X-API-KEY: <BAZARR_API_KEY>" \
   Tailscale.
 - Chave do Bazarr movida para `.bazarr_key` no servidor; `custom.js` sem segredo.
 - Gaming público: 8098 expõe só `/gaming/status` (sem IP/MAC) e
-  `/gaming/wake` com `X-Gaming-Password`; senha em `.gaming_password` e limite
-  de 5 falhas/min. O 8099 privado continua LAN-only.
+  `/gaming/wake` com `X-Gaming-Password`; senha em `GAMING_PASSWORD` no `.env`
+  e limite de 5 falhas/min. O 8099 privado continua LAN-only.
