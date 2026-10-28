@@ -1,4 +1,4 @@
-﻿import { GAMING, REMOTE, SERVICE_HOST, mk, toast, sleep } from './shared.js';
+import { GAMING, REMOTE, SERVICE_HOST, mk, toast, sleep } from './shared.js';
 
 export function initWakeCard() {
   const WAKE_SEL = 'li.service[data-name="PC Casa"]';
@@ -27,7 +27,7 @@ export function initWakeCard() {
         if (REMOTE) {
           box.style.flexDirection = 'column';
           box.style.gap = '4px';
-          box.appendChild(mk('div', 'color:#9aa0a6;font:11px system-ui;text-align:center', 'Senha definida no servidor'));
+          box.appendChild(mk('div', 'color:#a1a1aa;font:12px system-ui;text-align:center', 'Senha definida no servidor'));
         }
         container.appendChild(box);
     } else {

@@ -16,12 +16,21 @@ export function initSubs(root) {
   const quotaEl = h('div', 'hx-quota', '');
   const quotaLine = h('div', 'hx-quota-line', 'OpenSubtitles: verificando quota...');
   const quotaBar = h('div', 'hx-bar', '');
+  quotaBar.setAttribute('role', 'progressbar');
+  quotaBar.setAttribute('aria-label', 'Quota restante do OpenSubtitles');
+  quotaBar.setAttribute('aria-valuemin', '0');
+  quotaBar.setAttribute('aria-valuemax', '0');
+  quotaBar.setAttribute('aria-valuenow', '0');
   const quotaFill = h('span', '', '');
   quotaBar.appendChild(quotaFill);
   quotaEl.append(quotaLine, quotaBar);
 
   const status = h('div', 'hx-muted', '');
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
   const diag = h('div', 'hx-warn', '');
+  diag.setAttribute('role', 'status');
+  diag.setAttribute('aria-live', 'polite');
   const queueEl = h('div', '', '');
 
   const searchInput = h('input', 'hx-input hx-search');
@@ -116,6 +125,9 @@ export function initSubs(root) {
       quotaLine.textContent = `OpenSubtitles: quota indisponível (limite de segurança: ${SAFE_CAP}/dia)`;
       quotaLine.style.color = '#f59e0b';
       quotaFill.style.width = '0%';
+      quotaBar.setAttribute('aria-valuemax', '0');
+      quotaBar.setAttribute('aria-valuenow', '0');
+      quotaBar.setAttribute('aria-label', 'Quota do OpenSubtitles indisponível');
       return;
     }
     const left = Number(q.remaining_downloads) || 0;
@@ -124,6 +136,9 @@ export function initSubs(root) {
     quotaLine.style.color = left > 0 ? '#c9ccd1' : '#f87171';
     quotaFill.style.width = allowed > 0 ? `${Math.max(0, Math.min(100, (left / allowed) * 100))}%` : '0%';
     quotaFill.style.background = left > 0 ? '#4ade80' : '#f87171';
+    quotaBar.setAttribute('aria-valuemax', String(allowed));
+    quotaBar.setAttribute('aria-valuenow', String(left));
+    quotaBar.setAttribute('aria-label', `Quota restante do OpenSubtitles: ${left} de ${allowed}`);
   }
 
   async function refreshQuota() {

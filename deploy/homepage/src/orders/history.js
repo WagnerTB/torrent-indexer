@@ -1,4 +1,4 @@
-import { norm, countLabel, h, btn, toast, fmtDate } from '../shared.js';
+import { norm, countLabel, h, btn, toast, fmtDate, relTime } from '../shared.js';
 import { statusOf, historyLabel, statusLabel, statusMessageFor, displayMessage, messageMatchesStatus, profileLabel, SOURCE_LABELS, ordersApi } from './common.js';
 
 export function createHistory(ctx) {
@@ -139,6 +139,7 @@ export function createHistory(ctx) {
     const dateValue = item.requestedAt || item.completedAt;
     const parts = dateParts(dateValue);
     const dateWrap = h('div', 'hx-hist-date', '');
+    dateWrap.title = relTime(dateValue);
     dateWrap.appendChild(h('span', 'hx-hist-date-label', item.requestedAt ? (item.source === 'seerr' ? 'pedido' : 'adicionado') : 'concluído'));
     dateWrap.appendChild(h('span', '', parts.date));
     if (parts.time) dateWrap.appendChild(h('span', 'hx-hist-time', parts.time));
@@ -155,9 +156,9 @@ export function createHistory(ctx) {
     if (item.requestedBy) bits.push('por ' + item.requestedBy);
     const seerrDone = item.source === 'seerr' && statusKey === 'request_completed';
     if (seerrDone) {
-      bits.push(item.completedAt ? 'concluído em ' + fmtDate(item.completedAt) + ' (aprox.)' : 'concluído sem data');
+      bits.push(item.completedAt ? 'concluído em ' + fmtDate(item.completedAt) + ' (aprox.) • ' + relTime(item.completedAt) : 'concluído sem data');
     } else if (item.completedAt) {
-      bits.push('concluído em ' + fmtDate(item.completedAt));
+      bits.push('concluído em ' + fmtDate(item.completedAt) + ' • ' + relTime(item.completedAt));
     }
     if (bits.length) main.appendChild(h('div', 'hx-hist-meta', bits.join(' • ')));
 

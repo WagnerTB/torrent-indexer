@@ -13,14 +13,18 @@ export function createAddSeries(ctx) {
   addInput.setAttribute('aria-label', 'Buscar série ou anime no Sonarr');
   const addResults = h('div', '', '');
   const addBody = h('div', 'hx-addbody', '');
+  addBody.id = 'hx-add-body';
   addBody.hidden = true;
   addBody.append(addInput, addResults);
   const addToggle = btn('Adicionar série/anime', 'hx-btn-primary', () => open());
+  addToggle.setAttribute('aria-controls', 'hx-add-body');
+  addToggle.setAttribute('aria-expanded', 'false');
   const addbar = h('div', 'hx-addbar', '');
   addbar.appendChild(addToggle);
 
   function show() {
     addBody.hidden = false;
+    addToggle.setAttribute('aria-expanded', 'true');
     addInput.focus();
     loadOptions().catch((e) => {
       addResults.innerHTML = '';
@@ -30,16 +34,19 @@ export function createAddSeries(ctx) {
 
   function open() {
     addBody.hidden = !addBody.hidden;
+    addToggle.setAttribute('aria-expanded', String(!addBody.hidden));
     if (!addBody.hidden) show();
   }
 
   function setActive(active) {
     addbar.hidden = !active;
     addBody.hidden = true;
+    addToggle.setAttribute('aria-expanded', 'false');
   }
 
   function close() {
     addBody.hidden = true;
+    addToggle.setAttribute('aria-expanded', 'false');
   }
 
   function loadOptions() {

@@ -77,6 +77,8 @@ export function initOrders(root) {
 
   const summary = h('div', 'hx-summary', '');
   const status = h('div', 'hx-muted', '');
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
   const statusText = h('span', '', 'Carregando pedidos...');
   status.appendChild(statusText);
   status.style.marginBottom = '10px';
@@ -84,8 +86,19 @@ export function initOrders(root) {
 
   const activeBtn = btn('Ativos', '', () => setView('active'));
   const historyBtn = btn('Histórico', '', () => setView('history'));
+  activeBtn.setAttribute('aria-pressed', 'true');
+  historyBtn.setAttribute('aria-pressed', 'false');
   const segments = h('div', 'hx-seg', '');
+  segments.setAttribute('role', 'group');
+  segments.setAttribute('aria-label', 'Visões de Pedidos');
   segments.append(activeBtn, historyBtn);
+  segments.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const next = state.view === 'active' ? 'history' : 'active';
+    setView(next);
+    (next === 'active' ? activeBtn : historyBtn).focus();
+  });
 
   const archivedLink = h('button', 'hx-btn hx-btn-link', '');
   archivedLink.type = 'button';
@@ -111,7 +124,7 @@ export function initOrders(root) {
   const episodeTitle = h('div', 'hx-group-title', 'Episódios pedidos');
   episodeHead.appendChild(episodeTitle);
   const episodeNote = h('div', 'hx-muted hx-episode-note', 'Séries fora dos perfis dublados (ex.: Bleach) também aparecem aqui; o perfil é mostrado no modal de episódios.');
-  episodeNote.style.fontSize = '11px';
+  episodeNote.style.fontSize = '12px';
   episodeNote.style.margin = '0 0 6px';
   const episodeList = h('div', '', '');
   episodeSection.append(episodeHead, episodeNote, episodeList);
@@ -264,8 +277,8 @@ export function initOrders(root) {
     dom.originSelect.value = state.originFilter;
     updateFilterOptions();
     updateArchivedLink();
-    dom.activeBtn.setAttribute('aria-selected', state.view === 'active' ? 'true' : 'false');
-    dom.historyBtn.setAttribute('aria-selected', state.view === 'history' ? 'true' : 'false');
+    dom.activeBtn.setAttribute('aria-pressed', state.view === 'active' ? 'true' : 'false');
+    dom.historyBtn.setAttribute('aria-pressed', state.view === 'history' ? 'true' : 'false');
     add.setActive(state.view === 'active');
     dom.summary.hidden = state.view !== 'active';
     dom.list.hidden = state.view !== 'active';

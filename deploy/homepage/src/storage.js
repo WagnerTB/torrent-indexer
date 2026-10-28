@@ -32,6 +32,11 @@ export function initStorage() {
     const parts = Array.isArray(item.parts) ? item.parts : [];
     const risk = Math.max(pct, ...parts.map((part) => Math.max(0, Math.min(100, Math.round(Number(part.percent) || 0)))));
     const bar = h('div', 'hx-storage-bar', '');
+    bar.setAttribute('role', 'progressbar');
+    bar.setAttribute('aria-label', `Uso de ${item.label || 'armazenamento'}`);
+    bar.setAttribute('aria-valuemin', '0');
+    bar.setAttribute('aria-valuemax', '100');
+    bar.setAttribute('aria-valuenow', String(pct));
     const fill = h('span', '', '');
     fill.style.width = pct + '%';
     fill.style.background = risk >= 90 ? '#f87171' : risk >= 75 ? '#fbbf24' : '#4ade80';

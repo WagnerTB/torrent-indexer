@@ -9,7 +9,7 @@
 .hx-shell[hidden]{display:none!important}
 .hx-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px 10px;border-bottom:1px solid #232327}
 .hx-head-title{font:650 16px/1.2 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#fff;margin:0}
-.hx-head-sub{display:block;color:#8f949b;font:11px system-ui;margin-top:3px}
+.hx-head-sub{display:block;color:#a1a1aa;font:12px system-ui;margin-top:3px}
 .hx-icon-btn{appearance:none;border:1px solid #333338;background:#1a1a1d;color:#c9ccd1;border-radius:9px;width:38px;height:38px;font:22px/1 system-ui;cursor:pointer;display:grid;place-items:center}
 .hx-icon-btn:hover{background:#252529;color:#fff}
 .hx-tabs{display:flex;gap:4px;padding:8px 14px 0;border-bottom:1px solid #232327;overflow-x:auto;scrollbar-width:none;flex:0 0 auto}
@@ -43,7 +43,7 @@
 .hx-bar{height:6px;border-radius:999px;background:#26262b;overflow:hidden;margin:7px 0 0}
 .hx-bar>span{display:block;height:100%;background:#60a5fa;width:0;transition:width .3s ease}
 .hx-summary{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px}
-.hx-chip{appearance:none;cursor:pointer;border:1px solid #2f2f35;background:#17171a;color:#c9ccd1;border-radius:999px;padding:6px 10px;font:11px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:inline-flex;align-items:center;gap:6px}
+.hx-chip{appearance:none;cursor:pointer;border:1px solid #2f2f35;background:#17171a;color:#c9ccd1;border-radius:999px;padding:6px 10px;font:12px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:inline-flex;align-items:center;gap:6px}
 .hx-chip:hover{background:#202024}
 .hx-chip[aria-pressed="true"]{border-color:#60a5fa;background:rgba(96,165,250,.12);color:#fff}
 .hx-chip b{font-weight:700}
@@ -51,7 +51,7 @@
 .hx-order{border:1px solid #26262b;border-radius:10px;background:#151518;padding:11px 12px;margin-bottom:8px}
 .hx-order-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .hx-order-title{min-width:0;color:#f1f2f4;font:600 13px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow-wrap:anywhere}
-.hx-kind{display:inline-block;color:#8f949b;font:600 10px system-ui;text-transform:uppercase;letter-spacing:.04em;margin-right:6px}
+.hx-kind{display:inline-block;color:#a1a1aa;font:600 11px system-ui;text-transform:uppercase;letter-spacing:.04em;margin-right:6px}
 .hx-status{flex:0 0 auto;border-radius:999px;padding:3px 8px;font:600 10px system-ui;border:1px solid transparent;white-space:nowrap}
 .hx-status-downloaded{color:#4ade80;background:rgba(74,222,128,.11);border-color:rgba(74,222,128,.28)}
 .hx-status-partial{color:#2dd4bf;background:rgba(45,212,191,.11);border-color:rgba(45,212,191,.28)}
@@ -60,35 +60,35 @@
 .hx-status-searching{color:#c084fc;background:rgba(192,132,252,.12);border-color:rgba(192,132,252,.3)}
 .hx-status-error{color:#f87171;background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.3)}
 .hx-status-missing{color:#a1a1aa;background:rgba(161,161,170,.1);border-color:rgba(161,161,170,.25)}
-.hx-order-meta{color:#8f949b;font-size:11px;margin-top:3px;overflow-wrap:anywhere}
-.hx-order-event{color:#7d838b;font-size:11px;margin-top:3px;overflow-wrap:anywhere}
+.hx-order-meta{color:#a1a1aa;font-size:12px;margin-top:3px;overflow-wrap:anywhere}
+.hx-order-event{color:#a1a1aa;font-size:12px;margin-top:3px;overflow-wrap:anywhere}
 .hx-order-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-.hx-order-result{color:#9aa0a6;font-size:11px;margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.hx-order-result{color:#a1a1aa;font-size:12px;margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere}
 #hx-storage{margin:1rem 1.25rem .5rem;padding:12px 14px;border:1px solid #26262b;border-radius:12px;background:#151518;color:#e5e7eb}
 #hx-storage[hidden]{display:none!important}
 body.hx-tab-active #hx-storage{display:none!important}
 .hx-storage-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
 .hx-storage-title{font:600 13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#f1f2f4}
 .hx-storage-meta{display:flex;align-items:center;gap:10px;min-width:0}
-.hx-storage-updated{font:11px system-ui;color:#7d838b;white-space:nowrap}
-.hx-storage-refresh{appearance:none;border:0;background:transparent;color:#60a5fa;cursor:pointer;font:11px system-ui;padding:0}
+.hx-storage-updated{font:12px system-ui;color:#9aa0a6;white-space:nowrap}
+.hx-storage-refresh{appearance:none;border:0;background:transparent;color:#60a5fa;cursor:pointer;font:12px system-ui;padding:0}
 .hx-storage-refresh:hover{color:#93c5fd}
 .hx-storage-refresh:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;border-radius:4px}
 .hx-storage-row{padding:8px 0;border-top:1px solid #202024}
 .hx-storage-row:first-of-type{border-top:0;padding-top:0}
 .hx-storage-line{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .hx-storage-label{min-width:0;font:600 12px system-ui;color:#e5e7eb;overflow-wrap:anywhere}
-.hx-storage-kind{display:inline-block;margin-left:6px;color:#8f949b;font:600 10px system-ui;text-transform:uppercase;letter-spacing:.04em}
+.hx-storage-kind{display:inline-block;margin-left:6px;color:#a1a1aa;font:600 11px system-ui;text-transform:uppercase;letter-spacing:.04em}
 .hx-storage-value{font:12px system-ui;color:#c9ccd1;white-space:nowrap}
 .hx-storage-bar{height:7px;border-radius:999px;background:#26262b;overflow:hidden;margin-top:6px}
 .hx-storage-bar>span{display:block;height:100%;width:0;background:#4ade80;transition:width .3s ease}
-.hx-storage-sub{font:11px system-ui;color:#7d838b;margin-top:4px;overflow-wrap:anywhere}
+.hx-storage-sub{font:12px system-ui;color:#9aa0a6;margin-top:4px;overflow-wrap:anywhere}
 .hx-storage-empty{font:12px system-ui;color:#8f949b;padding:4px 0}
 @media(min-width:640px){#hx-storage{margin:1rem 2.25rem .5rem}}
 .hx-viewbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 .hx-seg{display:inline-flex;gap:3px;padding:3px;border:1px solid #333338;border-radius:999px;background:#17171a}
 .hx-seg .hx-btn{border:0;border-radius:999px;background:transparent;color:#9aa0a6;min-height:30px;padding:6px 14px}
-.hx-seg .hx-btn[aria-selected="true"]{background:#1f6feb;color:#fff}
+.hx-seg .hx-btn[aria-pressed="true"]{background:#1f6feb;color:#fff}
 .hx-summary[hidden],.hx-episode-section[hidden],.hx-history-section[hidden]{display:none!important}
 .hx-status-request_pending{color:#fbbf24;background:rgba(251,191,36,.11);border-color:rgba(251,191,36,.28)}
 .hx-status-request_approved{color:#60a5fa;background:rgba(96,165,250,.12);border-color:rgba(96,165,250,.3)}
@@ -99,7 +99,7 @@ body.hx-tab-active #hx-storage{display:none!important}
 .hx-episode-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #202024}
 .hx-episode-main{min-width:0;flex:1 1 auto}
 .hx-episode-title{color:#e5e7eb;font:600 12px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow-wrap:anywhere}
-.hx-episode-sub{color:#7d838b;font-size:11px;margin-top:2px;overflow-wrap:anywhere}
+.hx-episode-sub{color:#9aa0a6;font-size:12px;margin-top:2px;overflow-wrap:anywhere}
 .hx-episode-side{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .hx-group{margin:16px 0 4px}
 .hx-group:first-child{margin-top:4px}
@@ -109,21 +109,24 @@ body.hx-tab-active #hx-storage{display:none!important}
 .hx-ep-label{min-width:0;color:#d4d4d8;font:12px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow-wrap:anywhere}
 .hx-ep-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .hx-hist{display:grid;grid-template-columns:92px minmax(0,1fr) auto;gap:4px 12px;align-items:start;border:1px solid #26262b;border-radius:8px;background:#151518;padding:8px 10px;margin-bottom:6px}
-.hx-hist-date{font:600 11px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#c9ccd1}
-.hx-hist-date-label{display:block;color:#7d838b;font:10px system-ui;text-transform:uppercase;letter-spacing:.04em}
-.hx-hist-time{display:block;color:#7d838b;font:10px system-ui}
+.hx-hist-date{font:600 12px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#c9ccd1}
+.hx-hist-date-label{display:block;color:#9aa0a6;font:11px system-ui;text-transform:uppercase;letter-spacing:.04em}
+.hx-hist-time{display:block;color:#9aa0a6;font:11px system-ui}
 .hx-hist-main{min-width:0}
 .hx-hist-title{color:#f1f2f4;font:600 12.5px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow-wrap:anywhere}
-.hx-hist-meta{color:#8f949b;font:11px/1.4 system-ui;margin-top:2px;overflow-wrap:anywhere}
-.hx-hist-event{color:#7d838b;font:11px/1.4 system-ui;margin-top:2px;overflow-wrap:anywhere}
+.hx-hist-meta{color:#a1a1aa;font:12px/1.4 system-ui;margin-top:2px;overflow-wrap:anywhere}
+.hx-hist-event{color:#a1a1aa;font:12px/1.4 system-ui;margin-top:2px;overflow-wrap:anywhere}
 .hx-hist-side{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
 .hx-hist-badges{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
 .hx-hist-badge{border-radius:999px;padding:2px 7px;font:600 10px system-ui;border:1px solid transparent;white-space:nowrap}
 .hx-hist-badge-active{color:#60a5fa;background:rgba(96,165,250,.1);border-color:rgba(96,165,250,.28)}
 .hx-hist-badge-archived{color:#c084fc;background:rgba(192,132,252,.1);border-color:rgba(192,132,252,.28)}
 .hx-hist-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
-.hx-hist-actions .hx-btn{min-height:28px;padding:4px 8px;font-size:11px}
-.hx-empty{padding:28px 10px;text-align:center;color:#8f949b;font-size:12px}
+.hx-hist-actions .hx-btn{min-height:32px;padding:5px 9px;font-size:12px}
+.hx-empty{padding:28px 10px;text-align:center;color:#a1a1aa;font-size:12px}
+.hx-ext-link{display:inline-flex;align-items:center;color:#60a5fa;text-decoration:none;font:12px system-ui;padding:4px 6px;border-radius:6px}
+.hx-ext-link:hover{color:#93c5fd;text-decoration:underline}
+.hx-ext-link:focus-visible{outline:2px solid #3b82f6;outline-offset:1px}
 .hx-sep{height:1px;background:#232327;margin:12px 0}
 @media(max-width:700px){
   #hx-fab{right:14px;bottom:calc(14px + env(safe-area-inset-bottom));padding:11px 16px}
@@ -164,7 +167,7 @@ body.hx-tab-active #hx-storage{display:none!important}
   body.hx-tab-active #information-widgets .widget-container:has(.information-widget-resource){display:none}
   body.hx-tab-active #information-widgets input[type="text"]{padding:8px 10px;font-size:13px;min-height:36px}
   body.hx-tab-active #information-widgets .information-widget-datetime .text-xl{font-size:16px}
-  body.hx-tab-active .hx-help{padding:6px 10px;font-size:11px}
+  body.hx-tab-active .hx-help{padding:6px 10px;font-size:12px}
   body.hx-tab-active .hx-help summary{padding:1px 0}
 }
 body.hx-has-nav #inner_wrapper{padding-top:50px!important}
@@ -201,11 +204,11 @@ body.hx-tab-active #footer{display:none!important}
 .hx-lookup-poster{width:46px;height:69px;object-fit:cover;border-radius:6px;background:#1c1c20;flex:0 0 auto}
 .hx-lookup-main{min-width:0;flex:1 1 auto}
 .hx-lookup-title{color:#f1f2f4;font:600 13px/1.3 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow-wrap:anywhere}
-.hx-lookup-meta{color:#8f949b;font-size:11px;margin-top:2px;overflow-wrap:anywhere}
+.hx-lookup-meta{color:#a1a1aa;font-size:12px;margin-top:2px;overflow-wrap:anywhere}
 .hx-lookup-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
 .hx-lookup-form{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
 .hx-lookup-form .hx-select{flex:1 1 150px}
-.hx-field{display:flex;flex-direction:column;gap:4px;flex:1 1 150px;min-width:0;font:11px system-ui;color:#9aa0a6}
+.hx-field{display:flex;flex-direction:column;gap:4px;flex:1 1 150px;min-width:0;font:12px system-ui;color:#9aa0a6}
 .hx-field .hx-select{flex:1 1 auto}
 .hx-season{border:1px solid #26262b;border-radius:10px;margin-bottom:8px;overflow:hidden}
 .hx-season[hidden],.hx-ep-row[hidden]{display:none!important}

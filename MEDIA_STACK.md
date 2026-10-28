@@ -693,8 +693,8 @@ Bazarr em `http://<LAN_IP>:6767`, config
    alterados no working tree; revisar e commitar.
 9. **Compose versionado**: o `deploy/raspberry/docker-compose.yml` foi
    atualizado em 2026-10-26; manter sincronizado com o compose vivo.
-10. **UI**: etapas 1, 0.5, 2, 3, 4 e 5 concluídas; faltam 6 (acessibilidade) e
-    7 (testes finais). O estado da sub-aba/filtros na URL segue opcional.
+10. **UI**: etapas 1, 0.5, 2, 3, 4, 5, 6 e 7 concluídas. O estado da
+    sub-aba/filtros na URL e o tema claro seguem opcionais.
 10. Itens órfãos de `/media/downloads` e `/media/docker` no banco do Jellyfin;
     limpar se aparecerem.
 11. **Acesso externo**: Homepage e serviços já usam o IP Tailscale

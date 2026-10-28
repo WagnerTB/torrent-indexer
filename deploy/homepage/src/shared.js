@@ -111,9 +111,12 @@ export function btn(text, cls, onClick) {
 export function toast(msg, ok = true) {
   let el = document.getElementById('extras-toast');
   if (!el) {
-    el = mk('div', 'position:fixed;right:20px;bottom:24px;z-index:100001;padding:10px 14px;border-radius:8px;font:13px system-ui;color:#fff;box-shadow:0 4px 20px rgba(0,0,0,.4);transition:opacity .3s;max-width:340px', '');
-    el.id = 'extras-toast';
-    document.body.appendChild(el);
+      el = mk('div', 'position:fixed;right:20px;bottom:24px;z-index:100001;padding:10px 14px;border-radius:8px;font:13px system-ui;color:#fff;box-shadow:0 4px 20px rgba(0,0,0,.4);transition:opacity .3s;max-width:340px', '');
+      el.id = 'extras-toast';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      el.setAttribute('aria-atomic', 'true');
+      document.body.appendChild(el);
   }
   el.style.background = ok ? '#1f7a3d' : '#8b1e1e';
   el.style.opacity = '1';
@@ -126,6 +129,24 @@ export function fmtDate(value) {
   if (!value) return '';
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+}
+
+export function relTime(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const diff = Date.now() - d.getTime();
+  const mins = Math.round(Math.abs(diff) / 60000);
+  if (mins < 1) return 'agora';
+  if (mins < 60) return `há ${mins} min`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `há ${hours} h`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `há ${days} d`;
+  const months = Math.round(days / 30);
+  if (months < 12) return `há ${months} ${months === 1 ? 'mês' : 'meses'}`;
+  const years = Math.round(months / 12);
+  return `há ${years} ${years === 1 ? 'ano' : 'anos'}`;
 }
 
 export function helpBox(lines) {

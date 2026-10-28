@@ -89,28 +89,63 @@ export function createEpisodes(ctx) {
     }
   }
 
+  let previousFocus = null;
+
   function closeEpisodes() {
     if (!epShell) return;
-    if (epShell._esc) document.removeEventListener('keydown', epShell._esc);
+    if (epShell._keydown) document.removeEventListener('keydown', epShell._keydown);
     epShell.remove();
     epShell = null;
+    if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === 'function') {
+      previousFocus.focus();
+    }
+    previousFocus = null;
   }
 
   function openEpisodes(seriesId, justAdded) {
     closeEpisodes();
+    previousFocus = document.activeElement;
     const shell = h('div', 'hx-shell', '');
     epShell = shell;
+    shell.setAttribute('role', 'dialog');
+    shell.setAttribute('aria-modal', 'true');
+    shell.setAttribute('aria-labelledby', 'hx-ep-title');
+    shell.setAttribute('aria-describedby', 'hx-ep-sub');
+    shell.tabIndex = -1;
     const head = h('div', 'hx-head', '');
     const headWrap = h('div', '', '');
     const title = h('h2', 'hx-head-title', 'Episódios');
+    title.id = 'hx-ep-title';
     const sub = h('span', 'hx-head-sub', 'Carregando...');
+    sub.id = 'hx-ep-sub';
     headWrap.append(title, sub);
-    head.append(headWrap, btn('Fechar', '', () => closeEpisodes()));
+    const closeBtn = btn('Fechar', '', () => closeEpisodes());
+    head.append(headWrap, closeBtn);
     const body = h('div', 'hx-body', '');
     shell.append(head, body);
-    shell._esc = (event) => { if (event.key === 'Escape') closeEpisodes(); };
-    document.addEventListener('keydown', shell._esc);
+    shell._keydown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeEpisodes();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = [...shell.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+        .filter((el) => !el.disabled && el.getClientRects().length > 0);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !shell.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !shell.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', shell._keydown);
     document.body.appendChild(shell);
+    closeBtn.focus();
     loadEpisodes(seriesId, justAdded, title, sub, body);
   }
 

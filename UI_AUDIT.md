@@ -3,7 +3,7 @@
 > **Nota:** IPs/caminhos de deploy foram substituídos por placeholders.
 
 - **Data:** 2026-10-27
-- **Status:** etapas **1, 0.5, 2, 3, 4 e 5 concluídas em 2026-10-28**; próximas etapas = **6 (acessibilidade)** e **7 (testes finais)**. O `custom.js` agora é buildado de `deploy/homepage/src`.
+- **Status:** **todas as etapas (1, 0.5, 2, 3, 4, 5, 6 e 7) concluídas em 2026-10-28**. O `custom.js` agora é buildado de `deploy/homepage/src`. Pendências opcionais: estado de filtros na URL e tema claro.
 - **Escopo:** Início, Pedidos (Ativos/Histórico), Legendas, modal de episódios, painel de armazenamento
 - **Método:** inspeção do `custom.js`, `media_agent.py` e configs do Homepage; Chrome headless em 1400×2200 e 390×844; chamadas reais a `/arr/pending`, `/requests`, `/storage` e `/subs/quota`; capturas de tela dos estados ativos, histórico, Legendas, mobile e modal de episódios.
 
@@ -88,7 +88,7 @@ Legenda de prioridade: **P0** = bloqueia/atrapalha muito o usuário novo ou envo
 
 ## 4. Etapas propostas
 
-> Etapas **1, 0.5, 2, 3, 4 e 5 concluídas** (2026-10-28). A ordem executada foi **1 → 0.5 → 2 → 3 → 4 → 5**; faltam **6 → 7**. O estado detalhado de implementação está no topo do documento e no checklist da seção 8.
+> **Todas as etapas concluídas** (2026-10-28), na ordem **1 → 0.5 → 2 → 3 → 4 → 5 → 6 → 7**. O estado detalhado está no topo do documento e no checklist da seção 8; restam apenas itens opcionais (URL state e tema claro).
 
 ### Etapa 0 — Registro e validação (concluída)
 
@@ -217,7 +217,7 @@ Objetivo: transformar o histórico em algo escaneável e sem contradições.
 
 ### Etapa 6 — Acessibilidade e polimento
 
-**Status:** pendente.
+**Status:** concluída em 2026-10-28. Toast e regiões de status com `aria-live`; sub-abas com `aria-pressed` e navegação por setas; modal com `role="dialog"`, `aria-modal`, foco preso e retorno de foco; barras com `role="progressbar"`/`aria-valuenow`; contraste e tamanhos secundários revisados; links Radarr/Sonarr apenas em LAN; datas relativas complementares. Tema claro continua fora (painéis dark-only).
 
 - Sub-abas com `role=tablist/tab/tabpanel` (ou `aria-pressed` consistente).
 - Barras com `role="progressbar"`/`aria-valuenow`.
@@ -232,7 +232,7 @@ Objetivo: transformar o histórico em algo escaneável e sem contradições.
 
 ### Etapa 7 — Reavaliação e testes finais
 
-**Status:** pendente.
+**Status:** concluída em 2026-10-28. Chrome headless em 1400×2200 e 390×844; teclado/foco/modal/filtros/empty/error; mocks para Seerr fora, Sonarr fora, quota 0, histórico com 120 registros e 2 discos; zero erros de console. Estado de filtros na URL segue opcional.
 
 - Reexecutar Chrome headless em 1400×2200 e 390×844.
 - Testar teclado, foco, modal, filtros, empty/error states.
@@ -415,14 +415,15 @@ Ordem confirmada: **1 → 0.5 → 2 → 3 → 4 → 5 → 6 → 7** (quick wins 
 - [x] Etapa 3 (mobile) aprovada e concluída.
 - [x] Etapa 4 (modal de episódios) aprovada e concluída.
 - [x] Etapa 5 (histórico) aprovada e concluída.
-- [ ] Etapa 6 (acessibilidade/polimento) aprovada.
+- [x] Etapa 6 (acessibilidade/polimento) concluída.
 - [x] Datas Seerr-only definidas (F-09/F-10): `updatedAt` aproximado; “sem data” quando ausente.
 - [x] Filtros definidos (F-36): chips + select contextual; origem separada no Histórico.
 - [x] Ajuda do WOL definida (F-37).
 - [x] “Como funciona” cobre modo remoto, escopo dublado, Pedidos vs Legendas e início do histórico (F-38/F-39).
+- [x] Etapa 7 (reavaliação/testes finais) concluída.
 - [ ] Decisões da seção 6 confirmadas.
-- [x] Etapas 1, 0.5, 2, 3, 4 e 5 concluídas. Próxima: **6 — Acessibilidade e polimento**.
+- [x] Etapas 1, 0.5, 2, 3, 4, 5, 6 e 7 concluídas.
 
 ---
 
-**Observação:** este documento é a fonte de verdade do plano. As etapas 1, 0.5, 2, 3, 4 e 5 foram implementadas e publicadas em 2026-10-28; o painel de armazenamento anterior permanece. Registre a data ao concluir cada etapa restante.
+**Observação:** este documento é a fonte de verdade do plano. Todas as etapas foram implementadas e publicadas em 2026-10-28; o painel de armazenamento anterior permanece. Itens opcionais ainda em aberto: estado de sub-aba/filtros na URL e tema claro.

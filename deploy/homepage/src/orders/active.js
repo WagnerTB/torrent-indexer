@@ -1,4 +1,4 @@
-import { norm, countLabel, h, btn, toast, fmtDate } from '../shared.js';
+import { REMOTE, SERVICE_HOST, norm, countLabel, h, btn, toast, fmtDate } from '../shared.js';
 import { STATUS, statusOf, itemLabel, profileLabel, eventLabel, ordersApi } from './common.js';
 
 export function createActive(ctx) {
@@ -92,6 +92,20 @@ export function createActive(ctx) {
     return 0;
   }
 
+  function externalLink(item) {
+    if (REMOTE || item.seerrOnly || !item.id) return null;
+    if (item.kind !== 'movie' && item.kind !== 'series') return null;
+    const label = item.kind === 'movie' ? 'Radarr' : 'Sonarr';
+    const port = item.kind === 'movie' ? 7878 : 8989;
+    const path = item.kind === 'movie' ? 'movie' : 'series';
+    const link = h('a', 'hx-ext-link', label + ' ↗');
+    link.href = `http://${SERVICE_HOST}:${port}/${path}/${item.id}`;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.title = `Abrir no ${label} (LAN)`;
+    return link;
+  }
+
   function renderOrder(item) {
     const statusKey = statusOf(item);
     const meta = STATUS[statusKey] || STATUS.missing;
@@ -136,6 +150,11 @@ export function createActive(ctx) {
     const pct = progressOf(item);
     if (pct > 0 || statusKey === 'downloading') {
       const bar = h('div', 'hx-bar', '');
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-label', 'Progresso do download');
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', '100');
+      bar.setAttribute('aria-valuenow', String(pct));
       const fill = h('span', '', '');
       fill.style.width = pct + '%';
       if (statusKey === 'error') fill.style.background = '#f87171';
@@ -253,6 +272,8 @@ export function createActive(ctx) {
 
       actions.appendChild(check);
       if (removeBtn) actions.appendChild(removeBtn);
+      const ext = externalLink(item);
+      if (ext) actions.appendChild(ext);
       box.append(actions, dynamic, result);
     }
     if (removeBtn && item.seerrOnly) {
