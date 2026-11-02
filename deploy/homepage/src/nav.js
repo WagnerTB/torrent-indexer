@@ -2,7 +2,7 @@
 import { injectStyles } from './styles.js';
 import { initOrders } from './orders/index.js';
 import { initSubs } from './subs.js';
-import { initStorage } from './storage.js';
+import { initStatus } from './status.js';
 
 export function initNav() {
   injectStyles();
@@ -67,7 +67,7 @@ export function initNav() {
 
   const orders = initOrders(panes.pedidos);
   const legendas = initSubs(panes.legendas);
-  const storage = initStorage();
+  const status = initStatus();
   const instances = { pedidos: orders, legendas };
 
   let active = 'home';
@@ -121,7 +121,7 @@ export function initNav() {
     }
     if (focus && tabButtons[name]) tabButtons[name].focus();
     if (instances[name]) instances[name].activate();
-    if (name === 'home') storage.refresh();
+    if (name === 'home') status.refresh();
   }
 
   function ensureMounted() {

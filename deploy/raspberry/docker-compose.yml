@@ -325,6 +325,8 @@ services:
       STATE_DIR: /state
       OS_API_KEY: ${OS_API_KEY:-}
       STORAGE_CONFIG: '[{"id":"ssd01","label":"SSD 01","kind":"SSD","parts":[{"label":"Mídia","path":"/host/pimedia-probe"},{"label":"Docker","path":"/"}]},{"id":"system","label":"Sistema","kind":"microSD","parts":[{"label":"Sistema","path":"/host/root-probe"}]}]'
+      STATUS_PROBE_FILE: /state/pi-status.json
+      STATUS_CLEAR_FILE: /state/pi-status.json.clear
     volumes:
       - ${CONFIG_ROOT}/media-agent:/app:ro
       - ${CONFIG_ROOT}/media-agent/state:/state

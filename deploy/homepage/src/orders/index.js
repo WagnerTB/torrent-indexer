@@ -90,6 +90,10 @@ export function initOrders(root) {
   status.setAttribute('aria-live', 'polite');
   const statusText = h('span', '', 'Carregando pedidos...');
   status.appendChild(statusText);
+  const orphanWarn = h('span', 'hx-warn hx-orphan-warn', '');
+  orphanWarn.hidden = true;
+  orphanWarn.title = 'Episódios de séries que não estão na lista ativa (por exemplo, itens arquivados). Eles continuam pedidos, mas não aparecem nos cards.';
+  status.appendChild(orphanWarn);
   status.style.marginBottom = '10px';
   const list = h('div', '', '');
   const pagination = h('div', 'hx-pager', '');
@@ -129,16 +133,6 @@ export function initOrders(root) {
   status.appendChild(archivedLink);
   const viewBar = h('div', 'hx-viewbar', '');
   viewBar.appendChild(segments);
-
-  const episodeSection = h('div', 'hx-episode-section', '');
-  const episodeHead = h('div', 'hx-group-head', '');
-  const episodeTitle = h('div', 'hx-group-title', 'Episódios pedidos');
-  episodeHead.appendChild(episodeTitle);
-  const episodeNote = h('div', 'hx-muted hx-episode-note', 'Séries fora dos perfis dublados (ex.: Bleach) também aparecem aqui; o perfil é mostrado no modal de episódios.');
-  episodeNote.style.fontSize = '12px';
-  episodeNote.style.margin = '0 0 6px';
-  const episodeList = h('div', '', '');
-  episodeSection.append(episodeHead, episodeNote, episodeList);
 
   const historySection = h('div', 'hx-history-section', '');
   const historySummary = h('div', 'hx-summary', '');
@@ -181,10 +175,6 @@ export function initOrders(root) {
     viewBar,
     archivedLink,
     seerrLink,
-    episodeSection,
-    episodeHead,
-    episodeTitle,
-    episodeList,
     historySection,
     historySummary,
     historyActions,
@@ -201,7 +191,7 @@ export function initOrders(root) {
   const add = createAddSeries(ctx);
   add.bar.appendChild(seerrLink);
 
-  root.append(help, viewBar, add.bar, add.body, toolbar, summary, status, list, pagination, episodeSection, historySection);
+  root.append(help, viewBar, add.bar, add.body, toolbar, summary, status, list, pagination, historySection);
 
   function setStatus(text, color) {
     statusText.textContent = text;
@@ -215,6 +205,14 @@ export function initOrders(root) {
   function updateArchivedLink() {
     dom.archivedLink.hidden = state.view !== 'active' || state.hiddenCount <= 0;
     dom.archivedLink.textContent = `${countLabel(state.hiddenCount, 'arquivado', 'arquivados')} — ver no Histórico`;
+  }
+
+  function updateOrphanWarn() {
+    const count = active.orphanEpisodeCount();
+    orphanWarn.hidden = state.view !== 'active' || count === 0;
+    orphanWarn.textContent = count
+      ? ` • ${countLabel(count, 'episódio', 'episódios')} de séries fora da lista`
+      : '';
   }
 
   async function updateCount() {
@@ -301,11 +299,12 @@ export function initOrders(root) {
 
   function renderList() {
     active.renderSummary(state.items);
+    updateOrphanWarn();
     const rows = active.filteredItems();
     dom.list.innerHTML = '';
     if (!rows.length) {
       dom.pagination.hidden = true;
-      const hasEpisodes = episodes.filteredEpisodes().length > 0;
+      const hasEpisodes = active.filteredEpisodes().length > 0;
       if (state.items.length) {
         dom.list.appendChild(h('div', 'hx-empty', 'Nenhum pedido corresponde ao filtro.'));
         return;
@@ -342,7 +341,6 @@ export function initOrders(root) {
       history.renderHistory();
     } else {
       renderList();
-      episodes.renderEpisodeRequests();
     }
     if (ctx.filters) ctx.filters.updateButton();
   }
@@ -374,7 +372,7 @@ export function initOrders(root) {
     dom.list.hidden = state.view !== 'active';
     dom.filtersBtn.hidden = false;
     dom.pagination.hidden = state.view !== 'active';
-    dom.episodeSection.hidden = state.view !== 'active' || !episodes.filteredEpisodes().length;
+    if (state.view === 'history') orphanWarn.hidden = true;
     dom.historySection.hidden = state.view !== 'history';
     if (state.view === 'history') {
       history.loadHistory(true);
@@ -407,7 +405,6 @@ export function initOrders(root) {
       state.lastLoaded = Date.now();
       publish(state.items, state.episodeItems.length);
       renderList();
-      episodes.renderEpisodeRequests();
       const warning = payload.seerrError ? ` • Seerr indisponível: ${payload.seerrError}` : '';
       setStatus(`${activeStatusText()}${warning}${updatedSuffix()}`, payload.seerrError ? '#f59e0b' : '#9aa0a6');
     } catch (e) {
@@ -427,7 +424,6 @@ export function initOrders(root) {
   helpers.renderList = renderList;
   helpers.load = load;
   helpers.openEpisodes = episodes.openEpisodes;
-  helpers.renderEpisodeRequests = episodes.renderEpisodeRequests;
   helpers.loadHistory = history.loadHistory;
 
   searchInput.addEventListener('input', () => { state.query = searchInput.value; state.page = 1; renderCurrent(); });

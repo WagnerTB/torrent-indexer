@@ -1,6 +1,8 @@
 import { MEDIA, sleep, api, data, sleepSafe, norm, countLabel, langLabel, h, btn, toast, fmtDate, setTabCount, helpBox } from './shared.js';
 
 const QKEY = 'subs_queue_v1';
+const AUTO_LOCK = 'subs_queue_auto_v1';
+const AUTO_COOLDOWN = 30 * 60 * 1000;
 const SAFE_CAP = 5;
 
 export function initSubs(root) {
@@ -9,9 +11,12 @@ export function initSubs(root) {
   let seriesTs = 0;
   let filter = '';
   let seriesId = '';
+  let langFilter = '';
   let loading = false;
   let syncing = false;
   let reloading = false;
+  let batch = null;
+  const subUi = new Map();
 
   const quotaEl = h('div', 'hx-quota', '');
   const quotaLine = h('div', 'hx-quota-line', 'OpenSubtitles: verificando quota...');
@@ -38,17 +43,24 @@ export function initSubs(root) {
   searchInput.placeholder = 'Filtrar por série ou episódio...';
   searchInput.setAttribute('aria-label', 'Filtrar legendas por série ou episódio');
 
-  const seriesSelect = h('select', 'hx-select');
+  const seriesSelect = h('select', 'hx-select hx-compact');
   seriesSelect.setAttribute('aria-label', 'Filtrar por série');
   const allOption = h('option', '', 'Todas as séries');
   allOption.value = '';
   seriesSelect.appendChild(allOption);
 
-  const bAll = btn('Buscar todas pendentes', 'hx-btn-primary', async () => {
+  const langSelect = h('select', 'hx-select hx-compact');
+  langSelect.setAttribute('aria-label', 'Filtrar legendas por idioma');
+  langSelect.title = 'Mostra só episódios com esse idioma pendente';
+  const langAll = h('option', '', 'Idioma: todos');
+  langAll.value = '';
+  langSelect.appendChild(langAll);
+
+  const bAll = btn('Buscar pendentes', 'hx-btn-primary', async () => {
     const wanted = await getWanted();
     await runBatch(wanted, 'todas pendentes');
   });
-  bAll.title = 'Busca legendas para todos os episódios pendentes, respeitando o limite diário';
+  bAll.title = 'Busca todos os episódios pendentes; usa PT-BR quando disponível';
   const bSync = btn('Sincronizar existentes', '', async () => {
     if (syncing) return;
     syncing = true;
@@ -76,14 +88,14 @@ export function initSubs(root) {
   bReload.title = 'Recarrega quota, fila e lista de pendências';
 
   const toolbar = h('div', 'hx-toolbar', '');
-  toolbar.append(searchInput, seriesSelect, bAll, bSync, bReload);
+  toolbar.append(searchInput, seriesSelect, langSelect, bAll, bSync, bReload);
 
   const list = h('div', '', '');
 
   const help = helpBox([
     'Esta aba lista os episódios sem legenda detectados pelo Bazarr.',
     'A quota é o limite diário do OpenSubtitles; a renovação é diária e o horário exato não é informado.',
-    'A fila é salva neste navegador e não acompanha outro dispositivo.',
+    'A fila é salva neste navegador e roda automaticamente quando a renovação chega, com esta aba aberta e visível. Não acompanha outro dispositivo.',
     '“Sincronizar existentes” reprocessa as legendas que já estão no Bazarr e pode levar alguns minutos.',
     'Pedidos (vídeo) e Legendas são fluxos separados.',
   ]);
@@ -95,18 +107,94 @@ export function initSubs(root) {
     bAll.disabled = on;
     bSync.disabled = on;
     bReload.disabled = on;
-    bAll.textContent = loading ? 'Buscando...' : 'Buscar todas pendentes';
+    bAll.textContent = loading ? 'Buscando...' : (subsRows.length ? `Buscar pendentes (${subsRows.length})` : 'Buscar pendentes');
     bSync.textContent = syncing ? 'Sincronizando...' : 'Sincronizar existentes';
     bReload.textContent = reloading ? 'Atualizando...' : 'Atualizar';
-    list.querySelectorAll('button').forEach((b) => { b.disabled = on; });
+    list.querySelectorAll('.hx-sub-action, .hx-sub-batch, .hx-ep-actions button').forEach((b) => { b.disabled = on; });
     queueEl.querySelectorAll('button').forEach((b) => { b.disabled = on; });
   }
+
+  const pad2 = (value) => String(Number(value) || 0).padStart(2, '0');
 
   const episodeLabel = (e) => {
     const m = String(e.episode_number || '').match(/(\d+)\s*x\s*(\d+)/i);
     if (m) return `${e.seriesTitle || 'Item'} S${m[1].padStart(2, '0')}E${m[2].padStart(2, '0')}`;
-    return `${e.seriesTitle || 'Item'} S${String(e.season || 0).padStart(2, '0')}E${String(e.episode || 0).padStart(2, '0')}`;
+    return `${e.seriesTitle || 'Item'} S${pad2(e.season)}E${pad2(e.episode)}`;
   };
+
+  function seriesKey(item) {
+    return item.sonarrSeriesId != null ? String(item.sonarrSeriesId) : (item.seriesTitle || 'outros');
+  }
+
+  function startBatch(items, label) {
+    const groups = new Map();
+    for (const item of items) {
+      const key = seriesKey(item);
+      if (!groups.has(key)) groups.set(key, { total: 0, done: 0 });
+      groups.get(key).total++;
+    }
+    batch = { label, groups, currentKey: '' };
+  }
+
+  const PT_CODES = new Set(['pb', 'pt-br', 'pt']);
+
+  function languageKey(code) {
+    const value = String(code || '').toLowerCase();
+    if (!value) return '';
+    return PT_CODES.has(value) ? 'pt' : value;
+  }
+
+  function pickMissing(list) {
+    const missings = (list || []).filter((miss) => miss && miss.code2);
+    for (const code of ['pb', 'pt-br', 'pt']) {
+      const hit = missings.find((miss) => String(miss.code2).toLowerCase() === code);
+      if (hit) return hit;
+    }
+    return missings[0] || {};
+  }
+
+  function missingFor(list, language) {
+    const missings = (list || []).filter((miss) => miss && miss.code2);
+    const target = languageKey(language);
+    if (!target) return pickMissing(missings);
+    if (target === 'pt') {
+      for (const code of ['pb', 'pt-br', 'pt']) {
+        const hit = missings.find((miss) => String(miss.code2).toLowerCase() === code);
+        if (hit) return hit;
+      }
+      return pickMissing(missings);
+    }
+    return missings.find((miss) => languageKey(miss.code2) === target) || pickMissing(missings);
+  }
+
+  function matchesLanguage(item, language) {
+    if (!language) return true;
+    const target = languageKey(language);
+    return (item.missing_subtitles || []).some((miss) => miss && miss.code2 && languageKey(miss.code2) === target);
+  }
+
+  function languageCodes(items) {
+    const map = new Map();
+    for (const item of items) {
+      for (const miss of (item.missing_subtitles || [])) {
+        if (!miss || !miss.code2) continue;
+        const key = languageKey(miss.code2);
+        if (!map.has(key)) map.set(key, langLabel(miss.code2));
+      }
+    }
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }
+
+  function languageSummary(items, language) {
+    if (language) return [langLabel(language)];
+    const labels = new Set();
+    for (const item of items) {
+      for (const miss of (item.missing_subtitles || [])) {
+        if (miss && miss.code2) labels.add(langLabel(miss.code2));
+      }
+    }
+    return [...labels];
+  }
   const getWanted = async () => data(await api('/api/episodes/wanted'));
   const getJobs = async () => data(await sleepSafe(() => api('/api/system/jobs'), []));
 
@@ -159,10 +247,10 @@ export function initSubs(root) {
     try { return JSON.parse(localStorage.getItem(QKEY) || '[]'); } catch (e) { return []; }
   }
   function saveQueue(q) { localStorage.setItem(QKEY, JSON.stringify(q)); }
-  function queueAdd(ep, dueAt) {
+  function queueAdd(ep, dueAt, language) {
     const q = loadQueue();
     if (!q.some((x) => x.sonarrEpisodeId === ep.sonarrEpisodeId)) {
-      const miss = (ep.missing_subtitles || [])[0] || {};
+      const miss = missingFor(ep.missing_subtitles, language);
       const m = String(ep.episode_number || '').match(/(\d+)\s*x\s*(\d+)/i);
       q.push({
         sonarrEpisodeId: ep.sonarrEpisodeId,
@@ -187,22 +275,45 @@ export function initSubs(root) {
   function renderQueue() {
     const q = loadQueue();
     queueEl.innerHTML = '';
-    if (!q.length) {
-      queueEl.appendChild(h('div', 'hx-muted', 'Fila vazia • a fila é salva neste navegador'));
-      return;
-    }
     const now = Date.now();
     const due = q.filter((x) => (x.dueAt || 0) <= now);
-    const label = due.length
-      ? `Fila: ${countLabel(q.length, 'episódio', 'episódios')} • ${countLabel(due.length, 'pronto', 'prontos')} para executar`
-      : `Fila: ${countLabel(q.length, 'episódio', 'episódios')} • aguardando a renovação diária`;
-    queueEl.appendChild(h('div', 'hx-muted', label + ' • salva neste navegador'));
-    const row = h('div', 'hx-toolbar', '');
-    if (due.length) {
-      row.appendChild(btn(`Executar fila agora (${due.length})`, 'hx-btn-primary', () => runQueue()));
+    const box = h('details', 'hx-help hx-queue', '');
+    box.open = due.length > 0;
+    const summary = h('summary', 'hx-queue-head', '');
+    summary.append(
+      h('span', '', `Fila de legendas${q.length ? ` (${q.length})` : ''}`),
+      h('span', 'hx-queue-note', q.length
+        ? (due.length ? `${countLabel(due.length, 'pronto', 'prontos')} para executar` : 'aguardando a renovação diária')
+        : 'vazia • salva neste navegador'),
+    );
+    box.appendChild(summary);
+    const body = h('div', 'hx-queue-body', '');
+    body.appendChild(h('div', 'hx-muted', q.length
+      ? (due.length ? 'A fila é salva neste navegador e roda automaticamente quando a renovação chega.' : 'A fila é salva neste navegador; aguardando a renovação diária.')
+      : 'A fila é salva neste navegador e não acompanha outro dispositivo.'));
+    if (q.length) {
+      const items = q.slice().sort((a, b) => (a.title || '').localeCompare(b.title || '', 'pt-BR', { numeric: true })
+        || (Number(a.season) - Number(b.season))
+        || (Number(a.episode) - Number(b.episode)));
+      const queueList = h('div', 'hx-queue-list', '');
+      for (const item of items.slice(0, 8)) {
+        const ready = (item.dueAt || 0) <= now;
+        const queueItem = h('div', 'hx-queue-item', '');
+        queueItem.append(
+          h('span', 'hx-queue-item-title', `${item.title || 'Série'} S${pad2(item.season)}E${pad2(item.episode)}`),
+          h('span', 'hx-queue-item-meta', `${langLabel(item.language)} • ${ready ? 'pronto' : fmtDate(item.dueAt)}`),
+        );
+        queueList.appendChild(queueItem);
+      }
+      if (items.length > 8) queueList.appendChild(h('div', 'hx-queue-more', `e mais ${items.length - 8}`));
+      body.appendChild(queueList);
     }
-    row.appendChild(btn('Limpar fila', '', () => { saveQueue([]); renderQueue(); }));
-    queueEl.appendChild(row);
+    const row = h('div', 'hx-toolbar', '');
+    if (due.length) row.appendChild(btn(`Executar fila agora (${due.length})`, 'hx-btn-primary', () => runQueue()));
+    if (q.length) row.appendChild(btn('Limpar fila', '', () => { saveQueue([]); renderQueue(); }));
+    body.appendChild(row);
+    box.appendChild(body);
+    queueEl.appendChild(box);
     updateBusy();
   }
 
@@ -292,7 +403,7 @@ export function initSubs(root) {
     return { ok: false, label, msg, quota: /downloadlimiteexceeded|limit exceeded/i.test(msg) };
   }
 
-  async function runBatch(items, label) {
+  async function runBatch(items, label, language = '') {
     if (loading) return;
     loading = true;
     updateBusy();
@@ -307,7 +418,7 @@ export function initSubs(root) {
     if (!Number.isFinite(remaining) || remaining < 0) remaining = 0;
     if (remaining <= 0) {
       const due = parseReset(quota);
-      list.forEach((e) => queueAdd(e, due));
+      list.forEach((e) => queueAdd(e, due, language));
       renderQueue();
       status.textContent = `Limite diário atingido (${quota ? quota.downloads_count : '?'}/${quota ? quota.allowed_downloads : '?'}). ${countLabel(list.length, 'episódio', 'episódios')} na fila para a próxima renovação diária.`;
       status.style.color = '#f59e0b';
@@ -317,6 +428,7 @@ export function initSubs(root) {
       return;
     }
 
+    startBatch(list, label);
     let used = 0;
     let ok = 0;
     let fail = 0;
@@ -324,21 +436,31 @@ export function initSubs(root) {
     const max = Math.min(list.length, remaining);
     for (; idx < list.length && used < remaining; idx++) {
       const ep = list[idx];
-      const miss = (ep.missing_subtitles || [])[0] || {};
+      const key = seriesKey(ep);
+      const miss = missingFor(ep.missing_subtitles, language);
+      if (batch) {
+        batch.currentKey = key;
+        renderList();
+      }
       status.textContent = `Buscando ${Math.min(idx + 1, max)}/${max}: ${episodeLabel(ep)}...`;
       status.style.color = '#9aa0a6';
       const result = await searchOne(ep, miss);
+      if (batch) {
+        const group = batch.groups.get(key);
+        if (group) group.done = Math.min(group.total, group.done + 1);
+      }
       if (result.ok) { ok++; used++; } else { fail++; }
       await loadList(true);
       if (result.quota) break;
     }
+    batch = null;
     loading = false;
     updateBusy();
 
     const rest = list.slice(idx);
     const quota2 = await getQuota();
     const due = parseReset(quota2);
-    rest.forEach((e) => queueAdd(e, due));
+    rest.forEach((e) => queueAdd(e, due, language));
     await refreshQuota();
     await loadList(true);
     renderQueue();
@@ -355,8 +477,10 @@ export function initSubs(root) {
   }
 
   async function runQueue() {
+    if (loading || syncing || reloading) return;
     const due = queueDue();
     if (!due.length) { toast('Nada na fila para agora', false); return; }
+    try { localStorage.setItem(AUTO_LOCK, String(Date.now())); } catch (e) { /* ignore */ }
     queueRemove(due.map((x) => x.sonarrEpisodeId));
     renderQueue();
     const eps = due.map((x) => ({
@@ -371,18 +495,38 @@ export function initSubs(root) {
     renderQueue();
   }
 
+  function episodeCode(e) {
+    const m = String(e.episode_number || '').match(/(\d+)\s*x\s*(\d+)/i);
+    const season = m ? m[1] : String(e.season || 0);
+    const episode = m ? m[2] : String(e.episode || 0);
+    return `S${season.padStart(2, '0')}E${episode.padStart(2, '0')}`;
+  }
+
   function renderList() {
     list.innerHTML = '';
     const q = norm(filter);
     const sid = String(seriesId || '');
     const rows = subsRows.filter((e) => {
       if (sid && String(e.sonarrSeriesId || '') !== sid) return false;
+      if (!matchesLanguage(e, langFilter)) return false;
       if (q && !norm(`${e.seriesTitle || ''} ${e.title || ''} ${episodeLabel(e)}`).includes(q)) return false;
       return true;
     });
 
     if (!rows.length) {
       const empty = h('div', 'hx-empty', subsRows.length ? 'Nenhum episódio corresponde ao filtro.' : 'Nenhum episódio pendente.');
+      if (subsRows.length) {
+        empty.appendChild(btn('Limpar filtro', '', () => {
+          filter = '';
+          seriesId = '';
+          langFilter = '';
+          searchInput.value = '';
+          seriesSelect.value = '';
+          langSelect.value = '';
+          subUi.clear();
+          renderList();
+        }));
+      }
       list.appendChild(empty);
       updateBusy();
       return;
@@ -391,29 +535,122 @@ export function initSubs(root) {
     const groups = new Map();
     for (const e of rows) {
       const key = e.sonarrSeriesId != null ? String(e.sonarrSeriesId) : (e.seriesTitle || 'outros');
-      if (!groups.has(key)) groups.set(key, { title: e.seriesTitle || 'Série ' + key, items: [] });
+      if (!groups.has(key)) groups.set(key, { key, title: e.seriesTitle || 'Série ' + key, items: [] });
       groups.get(key).items.push(e);
     }
 
     const sorted = [...groups.values()].sort((a, b) => a.title.localeCompare(b.title));
+    const hasFilter = Boolean(q) || Boolean(sid) || Boolean(langFilter);
+    const defaultOpen = hasFilter || sorted.length === 1;
+
+    const summary = h('div', 'hx-sub-summary', '');
+    summary.appendChild(h('span', 'hx-muted', `${countLabel(sorted.length, 'série', 'séries')} • ${countLabel(rows.length, 'episódio', 'episódios')}${hasFilter ? ' no filtro' : ''}`));
+    const summaryActions = h('div', 'hx-sub-summary-actions', '');
+    if (hasFilter) {
+      summaryActions.appendChild(btn(`Buscar no filtro (${rows.length})`, 'hx-sub-batch', () => runBatch(rows, 'filtro', langFilter)));
+    }
+    if (sorted.length > 1) {
+      summaryActions.appendChild(btn('Expandir tudo', 'hx-sub-all', () => {
+        sorted.forEach((group) => subUi.set(group.key, true));
+        renderList();
+      }));
+      summaryActions.appendChild(btn('Recolher tudo', 'hx-sub-all', () => {
+        sorted.forEach((group) => subUi.set(group.key, false));
+        renderList();
+      }));
+    }
+    if (summaryActions.childNodes.length) summary.appendChild(summaryActions);
+    list.appendChild(summary);
+
     for (const group of sorted) {
-      const box = h('div', 'hx-group', '');
-      const head = h('div', 'hx-group-head', '');
-      head.appendChild(h('div', 'hx-group-title', `${group.title} (${group.items.length})`));
-      head.appendChild(btn(`Buscar ${group.items.length}`, '', () => runBatch(group.items, 'série ' + group.title)));
-      box.appendChild(head);
+      if (!subUi.has(group.key)) subUi.set(group.key, defaultOpen);
+      const open = subUi.get(group.key) === true;
+      const langs = languageSummary(group.items, langFilter);
+      const meta = `${countLabel(group.items.length, 'pendente', 'pendentes')}${langs.length ? ' • ' + langs.join(' • ') : ''}`;
+
+      const box = h('article', 'hx-order hx-sub-card', '');
+      const head = h('div', 'hx-sub-head', '');
+      const toggle = h('button', 'hx-sub-toggle', '');
+      toggle.type = 'button';
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.setAttribute('aria-label', `${group.title}: ${open ? 'recolher' : 'expandir'} episódios`);
+      const text = h('span', 'hx-sub-text', '');
+      text.append(h('span', 'hx-sub-title', `${group.title} (${group.items.length})`), h('span', 'hx-sub-meta', meta));
+      toggle.appendChild(text);
+
+      const searchGroup = btn(`Buscar ${group.items.length}`, 'hx-sub-action', () => runBatch(group.items, 'série ' + group.title, langFilter));
+      searchGroup.title = `Buscar legenda para ${countLabel(group.items.length, 'episódio', 'episódios')} desta série`;
+      head.append(toggle, searchGroup);
+
+      const body = h('div', 'hx-sub-body', '');
+      body.hidden = !open;
       for (const e of group.items) {
-        const miss = (e.missing_subtitles || [])[0] || {};
-        const row = h('div', 'hx-ep', '');
-        row.appendChild(h('div', 'hx-ep-label', episodeLabel(e) + (miss.code2 ? ' • ' + langLabel(miss.code2) : '')));
+        const miss = missingFor(e.missing_subtitles, langFilter);
+        const row = h('div', 'hx-ep hx-sub-row', '');
+        const main = h('div', 'hx-sub-main', '');
+        const line = h('div', 'hx-sub-line', '');
+        line.appendChild(h('span', 'hx-sub-code', episodeCode(e)));
+        if (e.title) line.appendChild(h('span', 'hx-sub-name', e.title));
+        if (miss.code2) {
+          const lang = h('span', 'hx-sub-lang', langLabel(miss.code2));
+          lang.title = 'Idioma usado na busca';
+          line.appendChild(lang);
+        }
+        main.appendChild(line);
         const actions = h('div', 'hx-ep-actions', '');
-        actions.appendChild(btn('Buscar', '', () => runBatch([e], episodeLabel(e))));
-        row.appendChild(actions);
-        box.appendChild(row);
+        actions.appendChild(btn('Buscar', '', () => runBatch([e], episodeLabel(e), langFilter)));
+        row.append(main, actions);
+        body.appendChild(row);
       }
+
+      toggle.addEventListener('click', () => {
+        const next = !(subUi.get(group.key) === true);
+        subUi.set(group.key, next);
+        toggle.setAttribute('aria-expanded', String(next));
+        toggle.setAttribute('aria-label', `${group.title}: ${next ? 'recolher' : 'expandir'} episódios`);
+        body.hidden = !next;
+      });
+
+      box.appendChild(head);
+      const progress = batch && batch.groups.get(group.key);
+      if (progress) {
+        const active = batch.currentKey === group.key;
+        const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
+        const line = h('div', 'hx-sub-progress', '');
+        line.appendChild(h('span', 'hx-sub-progress-label', active
+          ? `Buscando ${Math.min(progress.done + 1, progress.total)}/${progress.total}`
+          : `${progress.done}/${progress.total} concluídos`));
+        const bar = h('div', 'hx-sub-progress-bar', '');
+        const fill = h('span', '', '');
+        fill.style.width = pct + '%';
+        bar.appendChild(fill);
+        line.appendChild(bar);
+        box.appendChild(line);
+      }
+      box.appendChild(body);
       list.appendChild(box);
     }
     updateBusy();
+  }
+
+  function renderLanguageOptions() {
+    const current = langFilter;
+    langSelect.innerHTML = '';
+    const all = h('option', '', 'Idioma: todos');
+    all.value = '';
+    langSelect.appendChild(all);
+    const codes = languageCodes(subsRows);
+    for (const [code, label] of codes) {
+      const option = h('option', '', label);
+      option.value = code;
+      langSelect.appendChild(option);
+    }
+    if (current && codes.some(([code]) => code === current)) {
+      langSelect.value = current;
+    } else {
+      langSelect.value = '';
+      langFilter = '';
+    }
   }
 
   async function loadList(keepStatus) {
@@ -426,10 +663,14 @@ export function initSubs(root) {
       return;
     }
     if (!keepStatus) {
-      status.textContent = subsRows.length ? `${countLabel(subsRows.length, 'episódio', 'episódios')} sem legenda` : 'Nenhum episódio pendente.';
+      const seriesCount = new Set(subsRows.map((e) => e.sonarrSeriesId != null ? String(e.sonarrSeriesId) : (e.seriesTitle || 'outros'))).size;
+      status.textContent = subsRows.length
+        ? `${countLabel(subsRows.length, 'episódio', 'episódios')} sem legenda em ${countLabel(seriesCount, 'série', 'séries')}`
+        : 'Nenhum episódio pendente.';
       status.style.color = subsRows.length ? '#9aa0a6' : '#4ade80';
     }
     setTabCount('legendas', subsRows.length);
+    renderLanguageOptions();
     renderList();
   }
 
@@ -488,10 +729,26 @@ export function initSubs(root) {
     await loadSeries();
     renderQueue();
     await loadList();
+    maybeAutoQueue();
   }
 
-  searchInput.addEventListener('input', () => { filter = searchInput.value; renderList(); });
-  seriesSelect.addEventListener('change', () => { seriesId = seriesSelect.value; renderList(); });
+  function maybeAutoQueue() {
+    if (loading || syncing || reloading) return;
+    if (document.visibilityState !== 'visible') return;
+    const due = queueDue();
+    if (!due.length) return;
+    let locked = 0;
+    try { locked = Number(localStorage.getItem(AUTO_LOCK) || 0); } catch (e) { locked = 0; }
+    if (locked && Date.now() - locked < AUTO_COOLDOWN) return;
+    try { localStorage.setItem(AUTO_LOCK, String(Date.now())); } catch (e) { /* ignore */ }
+    toast(`Fila automática: ${countLabel(due.length, 'episódio', 'episódios')}`);
+    runQueue();
+  }
+
+  searchInput.addEventListener('input', () => { filter = searchInput.value; subUi.clear(); renderList(); });
+  seriesSelect.addEventListener('change', () => { seriesId = seriesSelect.value; subUi.clear(); renderList(); });
+  langSelect.addEventListener('change', () => { langFilter = langSelect.value; subUi.clear(); renderList(); });
+  window.setInterval(maybeAutoQueue, 60000);
 
   let lastRefresh = 0;
   return {

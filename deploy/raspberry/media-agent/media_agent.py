@@ -2,7 +2,6 @@
 import ipaddress
 import json
 import os
-import shutil
 import sqlite3
 import sys
 import threading
@@ -14,6 +13,8 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from system_status import request_throttle_clear, status_payload, storage_payload
 
 LISTEN_PORT = int(os.getenv("LISTEN_PORT", "8097"))
 LISTEN_HOST = os.getenv("LISTEN_HOST", "0.0.0.0")
@@ -393,85 +394,6 @@ def _json_load(value):
         return json.loads(value)
     except (TypeError, ValueError):
         return {}
-
-
-def _format_bytes(value):
-    try:
-        size = float(value or 0)
-    except (TypeError, ValueError):
-        size = 0.0
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024 or unit == "TB":
-            if unit in ("B", "KB", "MB"):
-                return f"{size:.0f} {unit}"
-            text = f"{size:.1f}".rstrip("0").rstrip(".")
-            return f"{text or '0'} {unit}"
-        size /= 1024
-    return "0 B"
-
-
-def _storage_entries():
-    if not STORAGE_CONFIG:
-        return []
-    try:
-        data = json.loads(STORAGE_CONFIG)
-    except (TypeError, ValueError):
-        return []
-    return data if isinstance(data, list) else []
-
-
-def storage_payload():
-    items = []
-    for entry in _storage_entries():
-        if not isinstance(entry, dict):
-            continue
-        parts = []
-        for part in entry.get("parts") or []:
-            if not isinstance(part, dict):
-                continue
-            path = str(part.get("path") or "").strip()
-            if not path:
-                continue
-            try:
-                usage = shutil.disk_usage(path)
-            except OSError:
-                continue
-            total = int(usage.total)
-            used = int(usage.used)
-            free = int(usage.free)
-            parts.append(
-                {
-                    "label": str(part.get("label") or path),
-                    "total": total,
-                    "used": used,
-                    "free": free,
-                    "percent": round(used / total * 100) if total else 0,
-                    "totalLabel": _format_bytes(total),
-                    "usedLabel": _format_bytes(used),
-                    "freeLabel": _format_bytes(free),
-                }
-            )
-        if not parts:
-            continue
-        total = sum(part["total"] for part in parts)
-        used = sum(part["used"] for part in parts)
-        free = sum(part["free"] for part in parts)
-        items.append(
-            {
-                "id": str(entry.get("id") or entry.get("label") or "storage"),
-                "label": str(entry.get("label") or "Armazenamento"),
-                "kind": str(entry.get("kind") or ""),
-                "total": total,
-                "used": used,
-                "free": free,
-                "percent": round(used / total * 100) if total else 0,
-                "totalLabel": _format_bytes(total),
-                "usedLabel": _format_bytes(used),
-                "freeLabel": _format_bytes(free),
-                "parts": parts,
-            }
-        )
-    return {"ok": True, "items": items, "generatedAt": _now_iso()}
 
 
 def _db_connect():
@@ -2030,8 +1952,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/subs/quota"):
             self._json(200, os_quota())
+        elif self.path.startswith("/status"):
+            self._json(200, status_payload(STORAGE_CONFIG))
         elif self.path.startswith("/storage"):
-            self._json(200, storage_payload())
+            self._json(200, storage_payload(STORAGE_CONFIG))
         elif self.path.startswith("/requests"):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
@@ -2059,7 +1983,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self._forbidden():
             return
-        if self.path.startswith("/requests/hide"):
+        if self.path.startswith("/status/clear-throttle"):
+            self._json(200, request_throttle_clear(STORAGE_CONFIG))
+        elif self.path.startswith("/requests/hide"):
             self._json(200, requests_hide(self._read_json()))
         elif self.path.startswith("/requests/restore"):
             payload = self._read_json()

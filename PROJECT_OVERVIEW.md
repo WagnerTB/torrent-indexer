@@ -141,12 +141,18 @@ SECURITY_AUDIT.md    Auditoria e rotação de segredos
 | GET | `/search` | Busca no cache do Meilisearch |
 | GET | `/search/health` | Saúde do Meilisearch |
 | GET | `/search/stats` | Estatísticas do índice |
+| GET | `/domains` | Domínios vistos nos títulos (`?unknown=1`, `?limit=100`) |
 | GET | `/ui/` | Interface web |
 | GET | `/api` e `/api/` | API Torznab (Prowlarr/Jackett) |
 | GET | `/metrics` | Métricas Prometheus (porta separada) |
 
 No Torznab, `t=caps` retorna as capacidades; `t=search&q=...` busca. O indexer
 padrão é `rede_torrent`; use `indexer=<nome>` para escolher outro.
+
+O post-processador `CleanupTitleWebsites` também coleta domínios vistos nos
+títulos em `torrent-indexer:domains` no Redis. `GET /domains?unknown=1` lista
+candidatos (domínio, contagem, amostras, origem e `known`). A coleta é apenas
+para descoberta/revisão; nenhum indexer é adicionado automaticamente.
 
 ## 6. Parâmetros de query
 

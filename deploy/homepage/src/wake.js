@@ -20,7 +20,7 @@ export function initWakeCard() {
     if (!container.querySelector('[data-wol-box]')) {
       box = mk('div', 'bg-theme-200/50 dark:bg-theme-900/20 rounded-sm m-1 flex items-center justify-center p-1', '');
       box.setAttribute('data-wol-box', '1');
-      btnEl = mk('button', 'cursor:pointer;border:0;border-radius:6px;padding:8px 10px;background:#7b2ff7;color:#fff;font:600 12px system-ui;width:100%;min-height:32px', 'Ligar PC');
+      btnEl = mk('button', 'cursor:pointer;border:0;border-radius:6px;padding:8px 10px;background:linear-gradient(135deg,#e50914,#b20710);color:#fff;font:600 12px system-ui;width:100%;min-height:32px', 'Ligar PC');
       btnEl.type = 'button';
       btnEl.onclick = doWake;
         box.appendChild(btnEl);

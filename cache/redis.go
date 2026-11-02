@@ -55,3 +55,15 @@ func (r *Redis) SetWithExpiration(ctx context.Context, key string, value []byte,
 func (r *Redis) Del(ctx context.Context, key string) error {
 	return r.client.Del(ctx, key).Err()
 }
+
+func (r *Redis) HGet(ctx context.Context, key, field string) ([]byte, error) {
+	return r.client.HGet(ctx, key, field).Bytes()
+}
+
+func (r *Redis) HSet(ctx context.Context, key, field string, value []byte) error {
+	return r.client.HSet(ctx, key, field, value).Err()
+}
+
+func (r *Redis) HGetAll(ctx context.Context, key string) (map[string]string, error) {
+	return r.client.HGetAll(ctx, key).Result()
+}

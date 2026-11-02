@@ -13,10 +13,12 @@ import (
 	"github.com/hbollon/go-edlib"
 )
 
-// CleanupTitleWebsites removes unwanted characters from the title
-func CleanupTitleWebsites(_ *Indexer, _ *http.Request, torrents []schema.IndexedTorrent) []schema.IndexedTorrent {
-	for i := range torrents {
-		torrents[i].Title = utils.NormalizeReleaseTitle(utils.RemoveKnownWebsites(torrents[i].Title))
+// CleanupTitleWebsites removes unwanted characters from the title and records
+// domains seen in the original release title for later review.
+func CleanupTitleWebsites(i *Indexer, r *http.Request, torrents []schema.IndexedTorrent) []schema.IndexedTorrent {
+	for index := range torrents {
+		i.recordDomains(r, torrents[index].Title)
+		torrents[index].Title = utils.NormalizeReleaseTitle(utils.RemoveKnownWebsites(torrents[index].Title))
 	}
 	return torrents
 }

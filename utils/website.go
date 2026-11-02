@@ -25,6 +25,7 @@ var commonTLDs = []string{
 	".la",
 	".se",
 	".to",
+	".mx",
 }
 
 var commonSubdomains = []string{
@@ -48,6 +49,12 @@ var commonWebsiteSLDs = []string{
 	"sitedetorrents",
 	"vamostorrent",
 	"AZTORRENTS",
+	"baixarapido",
+	"yts",
+	"torrentgalaxy",
+	"rarbg",
+	"eztv",
+	"nyaa",
 }
 
 var websitePatterns = []string{

@@ -1,8 +1,40 @@
 import { REMOTE, SERVICE_HOST, norm, countLabel, h, btn, toast, fmtDate } from '../shared.js';
-import { STATUS, statusOf, itemLabel, profileLabel, eventLabel, ordersApi } from './common.js';
+import {
+  STATUS, statusOf, itemLabel, profileLabel, eventLabel,
+  statusLabel, statusMessageFor, epLabel, historyLabel, ordersApi,
+} from './common.js';
+
+const EP_PAGE_SIZE = 3;
 
 export function createActive(ctx) {
   const { state, dom, helpers } = ctx;
+  const episodeUi = new Map();
+  let openMenu = null;
+
+  document.addEventListener('click', (event) => {
+    if (!openMenu) return;
+    if (openMenu.menu.contains(event.target) || openMenu.btn.contains(event.target)) return;
+    closeMenu();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeMenu();
+  });
+
+  function closeMenu() {
+    if (!openMenu) return;
+    openMenu.menu.hidden = true;
+    openMenu.btn.setAttribute('aria-expanded', 'false');
+    openMenu = null;
+  }
+
+  function toggleMenu(trigger, menu) {
+    const wasOpen = openMenu && openMenu.menu === menu && !menu.hidden;
+    closeMenu();
+    if (wasOpen) return;
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    openMenu = { btn: trigger, menu };
+  }
 
   function countsFor(rows) {
     const c = { done: 0, active: 0, error: 0, missing: 0, seerr: 0 };
@@ -61,11 +93,57 @@ export function createActive(ctx) {
     }
   }
 
+  function episodesFor(item) {
+    if (!item || item.kind !== 'series' || item.id == null) return [];
+    return state.episodeItems
+      .filter((ep) => String(ep.seriesId) === String(item.id))
+      .sort((a, b) => (Number(a.season) - Number(b.season)) || (Number(a.episode) - Number(b.episode)));
+  }
+
+  function filtersActive() {
+    return Boolean(norm(state.query))
+      || state.typeFilter !== 'all'
+      || state.profileFilter !== 'all'
+      || (state.statusFilter && state.statusFilter.length > 0)
+      || (state.filter && state.filter !== 'all');
+  }
+
+  function filteredEpisodes() {
+    const q = norm(state.query);
+    return state.episodeItems.filter((item) => {
+      if (q && !norm(historyLabel(item)).includes(q)) return false;
+      return ctx.filters ? ctx.filters.matches(item) : true;
+    });
+  }
+
+  function orphanEpisodeCount() {
+    const ids = new Set(
+      state.items
+        .filter((item) => item.kind === 'series' && item.id != null)
+        .map((item) => String(item.id))
+    );
+    const titles = new Set(
+      state.items
+        .filter((item) => item.kind === 'series')
+        .map((item) => norm(item.title))
+    );
+    let count = 0;
+    for (const ep of state.episodeItems) {
+      if (ids.has(String(ep.seriesId)) || titles.has(norm(ep.title))) continue;
+      count++;
+    }
+    return count;
+  }
+
   function filteredItems() {
     const q = norm(state.query);
     const rows = state.items.filter((item) => {
-      if (q && !norm(itemLabel(item)).includes(q)) return false;
-      return ctx.filters.matches(item);
+      const eps = item.kind === 'series' ? episodesFor(item) : [];
+      const titleHit = !q || norm(itemLabel(item)).includes(q);
+      const episodeHit = q && eps.some((ep) => norm(historyLabel(ep)).includes(q));
+      if (q && !titleHit && !episodeHit) return false;
+      if (ctx.filters.matches(item)) return true;
+      return eps.some((ep) => ctx.filters.matches(ep));
     });
     return ctx.filters.sortItems(rows);
   }
@@ -82,18 +160,121 @@ export function createActive(ctx) {
     return 0;
   }
 
-  function externalLink(item) {
+  function sonarrLink(item) {
     if (REMOTE || item.seerrOnly || !item.id) return null;
     if (item.kind !== 'movie' && item.kind !== 'series') return null;
     const label = item.kind === 'movie' ? 'Radarr' : 'Sonarr';
     const port = item.kind === 'movie' ? 7878 : 8989;
     const path = item.kind === 'movie' ? 'movie' : 'series';
-    const link = h('a', 'hx-ext-link', label + ' ↗');
+    const link = h('a', 'hx-menu-item', '');
     link.href = `http://${SERVICE_HOST}:${port}/${path}/${item.id}`;
     link.target = '_blank';
     link.rel = 'noopener';
-    link.title = `Abrir no ${label} (LAN)`;
+    link.setAttribute('role', 'menuitem');
+    link.append(h('span', 'hx-menu-label', 'Abrir no ' + label), h('span', 'hx-menu-hint', 'Somente em LAN'));
+    link.addEventListener('click', closeMenu);
     return link;
+  }
+
+  function menuItem(label, hint, onClick, cls) {
+    const item = h('button', 'hx-menu-item' + (cls ? ' ' + cls : ''), '');
+    item.type = 'button';
+    item.setAttribute('role', 'menuitem');
+    item.append(h('span', 'hx-menu-label', label));
+    if (hint) item.appendChild(h('span', 'hx-menu-hint', hint));
+    item.addEventListener('click', () => {
+      closeMenu();
+      onClick();
+    });
+    return item;
+  }
+
+  function archiveEpisode(item) {
+    if (!item.key) return;
+    if (!confirm(`Remover "${historyLabel(item)}" da lista? O histórico será mantido.`)) return;
+    ordersApi('/requests/hide', 'POST', { keys: [item.key] })
+      .then(() => {
+        state.episodeItems = state.episodeItems.filter((row) => row.key !== item.key);
+        toast('Removido da lista: ' + historyLabel(item));
+        helpers.renderList();
+        helpers.updateCount();
+      })
+      .catch((e) => toast('Erro ao remover: ' + e.message, false));
+  }
+
+  function episodeRow(item) {
+    const statusKey = statusOf(item);
+    const row = h('div', 'hx-episode-row', '');
+    const main = h('div', 'hx-episode-main', '');
+    main.appendChild(h('div', 'hx-episode-title', `${epLabel(item)} • ${item.episodeTitle || 'Episódio'}`));
+    const bits = [];
+    const msg = statusMessageFor(item);
+    if (msg) bits.push(msg);
+    if (item.requestedAt) bits.push((item.source === 'seerr' ? 'pedido em ' : 'adicionado em ') + fmtDate(item.requestedAt));
+    if (item.meta && item.meta.lastEvent && item.meta.lastEvent.date) {
+      bits.push('evento ' + eventLabel(item.meta.lastEvent) + ' ' + fmtDate(item.meta.lastEvent.date));
+    }
+    main.appendChild(h('div', 'hx-episode-sub', bits.filter(Boolean).join(' • ')));
+    const side = h('div', 'hx-episode-side', '');
+    side.appendChild(h('span', 'hx-status hx-status-' + statusKey, statusLabel(statusKey)));
+    side.appendChild(btn('Remover', 'hx-ep-remove', () => archiveEpisode(item)));
+    row.append(main, side);
+    return row;
+  }
+
+  function renderEpisodePanel(eps, uiKey) {
+    let ui = episodeUi.get(uiKey);
+    if (!ui) {
+      ui = { open: false, page: 1 };
+      episodeUi.set(uiKey, ui);
+    }
+    const wrap = h('div', 'hx-ep-panel', '');
+    const toggle = h('button', 'hx-ep-toggle', '');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', String(ui.open));
+    const label = h('span', 'hx-ep-toggle-label', `Episódios pedidos (${eps.length})`);
+    const done = eps.filter((item) => statusOf(item) === 'downloaded').length;
+    const errors = eps.filter((item) => ['error', 'request_declined', 'request_failed'].includes(statusOf(item))).length;
+    const meta = h('span', 'hx-ep-toggle-meta', `${done} baixados${errors ? ` • ${errors} com erro` : ''}`);
+    toggle.append(label, meta);
+    const body = h('div', 'hx-ep-panel-body', '');
+    body.hidden = !ui.open;
+    wrap.append(toggle, body);
+
+    function renderBody() {
+      body.innerHTML = '';
+      const pageCount = Math.max(1, Math.ceil(eps.length / EP_PAGE_SIZE));
+      ui.page = Math.max(1, Math.min(ui.page, pageCount));
+      const start = (ui.page - 1) * EP_PAGE_SIZE;
+      for (const item of eps.slice(start, start + EP_PAGE_SIZE)) body.appendChild(episodeRow(item));
+      if (pageCount > 1) {
+        const pager = h('div', 'hx-ep-pager', '');
+        const previous = btn('‹', 'hx-page', () => {
+          ui.page = Math.max(1, ui.page - 1);
+          renderBody();
+        });
+        previous.disabled = ui.page === 1;
+        previous.setAttribute('aria-label', 'Episódios anteriores');
+        const info = h('span', 'hx-page-info', `${start + 1}–${Math.min(start + EP_PAGE_SIZE, eps.length)} de ${eps.length}`);
+        const next = btn('›', 'hx-page', () => {
+          ui.page = Math.min(pageCount, ui.page + 1);
+          renderBody();
+        });
+        next.disabled = ui.page === pageCount;
+        next.setAttribute('aria-label', 'Próximos episódios');
+        pager.append(previous, info, next);
+        body.appendChild(pager);
+      }
+    }
+
+    toggle.addEventListener('click', () => {
+      ui.open = !ui.open;
+      toggle.setAttribute('aria-expanded', String(ui.open));
+      body.hidden = !ui.open;
+      if (ui.open) renderBody();
+    });
+    if (ui.open) renderBody();
+    return wrap;
   }
 
   function renderOrder(item) {
@@ -106,9 +287,35 @@ export function createActive(ctx) {
     const titleWrap = h('div', 'hx-order-title', '');
     const kind = h('span', 'hx-kind', item.kind === 'movie' ? 'Filme' : 'Série');
     titleWrap.append(kind, document.createTextNode(itemLabel(item)));
+
+    const side = h('div', 'hx-order-side', '');
     const badge = h('span', 'hx-status hx-status-' + statusKey, meta.label);
-    top.append(titleWrap, badge);
+    side.appendChild(badge);
+
+    const menu = h('div', 'hx-menu', '');
+    menu.hidden = true;
+    menu.setAttribute('role', 'menu');
+    const kebab = btn('⋯', 'hx-kebab', () => toggleMenu(kebab, menu));
+    kebab.setAttribute('aria-label', 'Mais ações');
+    kebab.setAttribute('aria-haspopup', 'menu');
+    kebab.setAttribute('aria-expanded', 'false');
+    side.appendChild(kebab);
+    side.appendChild(menu);
+    top.append(titleWrap, side);
     box.appendChild(top);
+
+    const ext = sonarrLink(item);
+    if (ext) {
+      menu.appendChild(ext);
+      menu.appendChild(h('div', 'hx-menu-sep', ''));
+    }
+    if (item.key) {
+      menu.appendChild(menuItem('Remover da lista', 'O histórico é mantido', () => archiveItem(item), 'hx-menu-item-danger'));
+    }
+    if (!menu.childNodes.length) {
+      kebab.hidden = true;
+      menu.remove();
+    }
 
     const parts = [];
     if (item.kind === 'series' && item.episodeCount) {
@@ -125,13 +332,6 @@ export function createActive(ctx) {
         ? profileLabel(item.profileName)
         : (item.profileId != null ? 'Perfil ' + item.profileId : '');
       if (profile) box.appendChild(h('div', 'hx-order-meta', 'perfil ' + profile));
-    }
-    if (item.kind === 'series') {
-      const eps = state.episodeItems.filter((ep) => ep.seriesId === item.id);
-      if (eps.length) {
-        const done = eps.filter((ep) => statusOf(ep) === 'downloaded').length;
-        box.appendChild(h('div', 'hx-order-event', `${countLabel(eps.length, 'episódio pedido', 'episódios pedidos')}: ${countLabel(done, 'baixado', 'baixados')}`));
-      }
     }
 
     const seerrInfo = item.seerr;
@@ -183,99 +383,18 @@ export function createActive(ctx) {
       };
       box.appendChild(h('div', 'hx-muted', hints[statusKey] || 'Pedido ainda não chegou ao Radarr/Sonarr.'));
     } else if (statusKey === 'missing') {
-      box.appendChild(h('div', 'hx-muted', 'Sem arquivo: use "Verificar PT-BR" para ver se há releases aceitas.'));
+      box.appendChild(h('div', 'hx-muted', 'Sem arquivo: o Radarr/Sonarr ainda não encontrou uma release aceita.'));
     }
 
-    const removeBtn = item.key ? btn('Remover', '', () => archiveItem(item)) : null;
-    if (!item.seerrOnly) {
-      const actions = h('div', 'hx-order-actions', '');
-      const dynamic = h('div', 'hx-order-actions', '');
-      dynamic.style.marginTop = '0';
-      const result = h('div', 'hx-order-result', '');
-      const check = btn('Verificar PT-BR', '', null);
-      check.title = 'Consulta os indexadores para ver se há releases aceitas em PT-BR';
-      check.setAttribute('aria-label', 'Verificar se há releases em PT-BR nos indexadores');
-
-      check.addEventListener('click', async () => {
-        if (state.busy) return;
-        state.busy = true;
-        check.disabled = true;
-        check.textContent = 'Verificando...';
-        dynamic.innerHTML = '';
-        result.textContent = 'Consultando indexadores...';
-        result.style.color = '#9aa0a6';
-        try {
-          const data = await ordersApi('/arr/check', 'POST', { kind: item.kind, id: item.id });
-          if (data.accepted > 0) {
-            result.textContent = `${countLabel(data.accepted, 'release PT-BR aceito', 'releases PT-BR aceitos')} (de ${data.total}).`;
-            result.style.color = '#4ade80';
-            const search = btn('Buscar PT-BR', 'hx-btn-primary', async () => {
-              if (state.busy) return;
-              state.busy = true;
-              search.disabled = true;
-              try {
-                await ordersApi('/arr/search', 'POST', { kind: item.kind, id: item.id });
-                toast('Busca PT-BR iniciada: ' + item.title);
-                result.textContent = 'Busca PT-BR iniciada.';
-                result.style.color = '#4ade80';
-                setTimeout(() => { state.busy = false; helpers.load(true); }, 8000);
-              } catch (e) {
-                state.busy = false;
-                toast('Erro na busca: ' + e.message, false);
-                result.textContent = 'Erro: ' + e.message;
-                result.style.color = '#f87171';
-                search.disabled = false;
-              }
-            });
-            dynamic.appendChild(search);
-          } else {
-            result.textContent = `Nenhum PT-BR aceito (${countLabel(data.total, 'release analisado', 'releases analisados')}).`;
-            result.style.color = '#f59e0b';
-              const original = btn('Buscar original', 'hx-btn-ok', async () => {
-                if (state.busy) return;
-                if (!confirm('Mudar o item para o perfil Original e iniciar a busca? Ele sairá dos perfis dublados.')) return;
-                state.busy = true;
-              original.disabled = true;
-              original.textContent = 'Trocando...';
-              try {
-                await ordersApi('/arr/switch', 'POST', { kind: item.kind, id: item.id });
-                toast('Perfil Original + busca iniciada: ' + item.title);
-                result.textContent = 'Perfil trocado para Original e busca iniciada.';
-                result.style.color = '#4ade80';
-                original.textContent = 'Original';
-                helpers.updateCount();
-                setTimeout(() => { state.busy = false; helpers.load(true); }, 8000);
-              } catch (e) {
-                state.busy = false;
-                toast('Erro ao trocar perfil: ' + e.message, false);
-                result.textContent = 'Erro: ' + e.message;
-                result.style.color = '#f87171';
-                original.disabled = false;
-                original.textContent = 'Buscar original';
-              }
-            });
-            original.title = 'Muda o item para o perfil Original e inicia a busca; ele sai dos perfis dublados';
-            dynamic.appendChild(original);
-          }
-        } catch (e) {
-          result.textContent = 'Erro: ' + e.message;
-          result.style.color = '#f87171';
-        }
-        state.busy = false;
-        check.disabled = false;
-        check.textContent = 'Verificar PT-BR';
-      });
-
-      actions.appendChild(check);
-      if (removeBtn) actions.appendChild(removeBtn);
-      const ext = externalLink(item);
-      if (ext) actions.appendChild(ext);
-      box.append(actions, dynamic, result);
-    }
-    if (removeBtn && item.seerrOnly) {
-      const footer = h('div', 'hx-order-actions', '');
-      footer.appendChild(removeBtn);
-      box.appendChild(footer);
+    if (item.kind === 'series') {
+      const allEps = episodesFor(item);
+      const q = norm(state.query);
+      const eps = filtersActive()
+        ? allEps.filter((ep) => (!q || norm(historyLabel(ep)).includes(q)) && ctx.filters.matches(ep))
+        : allEps;
+      if (eps.length) {
+        box.appendChild(renderEpisodePanel(eps, 'series:' + (item.id != null ? item.id : item.key || item.title)));
+      }
     }
     return box;
   }
@@ -293,5 +412,8 @@ export function createActive(ctx) {
       .catch((e) => toast('Erro ao remover: ' + e.message, false));
   }
 
-  return { countsFor, episodeCounts, renderSummary, filteredItems, progressOf, renderOrder, archiveItem };
+  return {
+    countsFor, episodeCounts, renderSummary, filteredItems, filteredEpisodes,
+    orphanEpisodeCount, progressOf, renderOrder, archiveItem,
+  };
 }

@@ -1,87 +1,9 @@
-import { norm, countLabel, h, btn, toast, fmtDate } from '../shared.js';
-import { statusOf, epLabel, statusLabel, statusMessageFor, eventLabel, historyLabel, profileLabel, seriesTypeLabel, ordersApi } from './common.js';
+import { norm, countLabel, h, btn, toast } from '../shared.js';
+import { profileLabel, seriesTypeLabel, ordersApi } from './common.js';
 
 export function createEpisodes(ctx) {
-  const { state, dom, helpers } = ctx;
+  const { state, helpers } = ctx;
   let epShell = null;
-
-  function filteredEpisodes() {
-    const q = norm(state.query);
-    return state.episodeItems.filter((item) => {
-      if (q && !norm(historyLabel(item)).includes(q)) return false;
-      if (ctx.filters && !ctx.filters.matches(item)) return false;
-      return true;
-    });
-  }
-
-  function archiveEpisode(item) {
-    if (!item.key) return;
-    if (!confirm(`Remover "${historyLabel(item)}" da lista? O histórico será mantido.`)) return;
-    ordersApi('/requests/hide', 'POST', { keys: [item.key] })
-      .then(() => {
-        state.episodeItems = state.episodeItems.filter((row) => row.key !== item.key);
-        toast('Removido da lista: ' + historyLabel(item));
-        renderEpisodeRequests();
-        helpers.renderList();
-        helpers.updateCount();
-      })
-      .catch((e) => toast('Erro ao remover: ' + e.message, false));
-  }
-
-  function renderEpisodeRequests() {
-    const rows = filteredEpisodes();
-    dom.episodeList.innerHTML = '';
-    dom.episodeTitle.textContent = `Episódios pedidos (${rows.length})`;
-    dom.episodeSection.hidden = !rows.length || state.view !== 'active';
-    if (!rows.length) return;
-    const groups = new Map();
-    for (const item of rows) {
-      const key = item.seriesId || item.title || item.key;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(item);
-    }
-    for (const eps of [...groups.values()].sort((a, b) => {
-      const da = Math.max(...a.map((x) => new Date(x.requestedAt || 0).getTime()));
-      const db = Math.max(...b.map((x) => new Date(x.requestedAt || 0).getTime()));
-      return db - da;
-    })) {
-      eps.sort((a, b) => (a.season - b.season) || (a.episode - b.episode));
-      const title = eps[0].title || 'Série';
-      const done = eps.filter((item) => statusOf(item) === 'downloaded').length;
-      const box = h('article', 'hx-order', '');
-      const top = h('div', 'hx-order-top', '');
-      const titleWrap = h('div', 'hx-order-title', '');
-      titleWrap.append(h('span', 'hx-kind', 'Série'), document.createTextNode(title));
-      const badge = h('span', 'hx-status hx-status-partial', `${done}/${eps.length} baixados`);
-      top.append(titleWrap, badge);
-      box.appendChild(top);
-      const profile = eps.find((item) => item.profileName)?.profileName;
-      if (profile) box.appendChild(h('div', 'hx-order-meta', 'perfil ' + profileLabel(profile)));
-      const body = h('div', 'hx-episode-rows', '');
-      for (const item of eps) {
-        const statusKey = statusOf(item);
-        const row = h('div', 'hx-episode-row', '');
-        const main = h('div', 'hx-episode-main', '');
-        main.appendChild(h('div', 'hx-episode-title', `${epLabel(item)} • ${item.episodeTitle || 'Episódio'}`));
-        const bits = [statusLabel(statusKey)];
-        const msg = statusMessageFor(item);
-        if (msg) bits.push(msg);
-        if (item.requestedAt) bits.push((item.source === 'seerr' ? 'pedido em ' : 'adicionado em ') + fmtDate(item.requestedAt));
-        if (item.meta && item.meta.lastEvent && item.meta.lastEvent.date) {
-          bits.push('evento ' + eventLabel(item.meta.lastEvent) + ' ' + fmtDate(item.meta.lastEvent.date));
-        }
-        main.appendChild(h('div', 'hx-episode-sub', bits.filter(Boolean).join(' • ')));
-        const side = h('div', 'hx-episode-side', '');
-        side.appendChild(h('span', 'hx-status hx-status-' + statusKey, statusLabel(statusKey)));
-        const remove = btn('Remover', 'hx-ep-remove', () => archiveEpisode(item));
-        side.appendChild(remove);
-        row.append(main, side);
-        body.appendChild(row);
-      }
-      box.appendChild(body);
-      dom.episodeList.appendChild(box);
-    }
-  }
 
   let previousFocus = null;
 
@@ -397,5 +319,5 @@ export function createEpisodes(ctx) {
     body.appendChild(foot);
   }
 
-  return { filteredEpisodes, archiveEpisode, renderEpisodeRequests, openEpisodes, closeEpisodes };
+  return { openEpisodes, closeEpisodes };
 }

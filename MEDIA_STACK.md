@@ -254,6 +254,53 @@ curl -s 'http://<LAN_IP>:8080/indexers/bludv?q=minions'
 curl -s 'http://<LAN_IP>:8080/api/rede_torrent?t=search&q=minions' | grep category
 ```
 
+### 5.1 Coleta de domínios para novos indexadores
+
+`CleanupTitleWebsites` registra domínios vistos no título original dos releases
+em Redis, sem alterar a lista de indexadores automaticamente. Serve para
+descobrir sites candidatos e revisar depois.
+
+- Chave Redis: `torrent-indexer:domains` (hash; persiste no volume
+  `redis-data`).
+- Endpoint: `GET /domains?unknown=1&limit=100` (por padrão só desconhecidos;
+  use `unknown=0` para ver todos).
+- Cada item traz `domain`, `count`, `first_seen`, `last_seen`, `known`,
+  `samples` (até 5 títulos) e `sources` (indexer de origem).
+- `known=true` vem de `utils/commonWebsiteSLDs` (ex.: `vamostorrent.com`,
+  `baixarapido.com`, `yts.mx`, `hidratorrents.org`). Os demais são candidatos.
+- O título é apenas uma pista: pode ser release group, site de origem ou ruído.
+  Só adicione um indexer depois de confirmar que o site tem busca/RSS e é
+  automatizável.
+- Opcional: defina `DOMAINS_REPORT_TOKEN` no container para exigir
+  `X-Domains-Token` ou `?token=`.
+- Exemplo:
+
+```bash
+curl -s 'http://<LAN_IP>:8080/domains?unknown=1&limit=100'
+```
+
+Também é possível consultar direto no Redis:
+
+```bash
+docker exec media-redis-1 redis-cli HGETALL torrent-indexer:domains
+```
+
+### 5.2 Como pedir a análise
+
+Frase de atalho: **“analise os possíveis indexadores novos”**.
+
+A fonte é `GET /domains?unknown=1&limit=500` (use `unknown=0` para incluir os
+já conhecidos). Para cada domínio, verificar:
+
+- se é site/tracker/indexer de verdade ou apenas release group, adware ou ruído
+  do título;
+- se tem busca/RSS/Torznab, login, Cloudflare ou magnet direto;
+- se os `samples`/`sources` fazem sentido e se há seeders/qualidade;
+- se vale criar um adapter em `api/<site>.go`, com URL de busca, paginação,
+  seletores, categorias e testes.
+
+Nada é adicionado automaticamente; a lista é só para triagem manual.
+
 ## 6. Perfis de qualidade, custom formats e Seerr
 
 Custom formats (Radarr e Sonarr):
@@ -402,12 +449,13 @@ Bazarr em `http://<LAN_IP>:6767`, config
   as credenciais do Bazarr e retorna:
   `allowed_downloads`, `remaining_downloads`, `downloads_count`,
   `reset_time_utc`, `reset_time`, `level`, `vip`.
-- A aba **Legendas** do Homepage mostra a quota, busca/filtro por episódio ou
-  série, “Buscar todas pendentes” e “Sincronizar existentes”. Ele chama o proxy
-  `/bazarr` do media-agent; a API key do Bazarr fica em `.bazarr_key` no
+- A aba **Legendas** do Homepage mostra a quota, busca/filtro por episódio,
+  série ou idioma, “Buscar pendentes” e “Sincronizar existentes”. Ele chama o
+  proxy `/bazarr` do media-agent; a API key do Bazarr fica em `.bazarr_key` no
   servidor, não no `custom.js`.
 - A fila é salva no `localStorage` do navegador (`subs_queue_v1`); o botão
-  “Executar fila agora” aparece quando o reset chega. Ela não roda em
+  “Executar fila agora” aparece quando o reset chega. Ela também tenta rodar
+  automaticamente quando o reset chega, com a aba aberta e visível; não roda em
   background com o navegador fechado.
 - O painel usa o job real do Bazarr para dar feedback (“Legenda baixada” ou
   “Nao encontrada” + detalhe do provedor).
@@ -418,10 +466,11 @@ Bazarr em `http://<LAN_IP>:6767`, config
 
 - URL LAN: `http://<LAN_IP>:3000`.
 - URL Tailscale: `http://<TAILSCALE_IP>:3000`.
-- Config viva: `<MEDIA_ROOT>/docker/homepage/{settings,services,widgets,bookmarks}.yaml`
-  e `custom.js`.
-- **Fonte do painel:** `deploy/homepage/src` (módulos ES). O `custom.js` do Pi é
-  artefato de build; não edite o arquivo no servidor. Build:
+- Config viva: `<MEDIA_ROOT>/docker/homepage/{settings,services,widgets,bookmarks}.yaml`,
+  `custom.js` e `custom.css`.
+- **Fonte do painel:** `deploy/homepage/src` (módulos ES) e
+  `deploy/homepage/custom.css` (tema global). O `custom.js` do Pi é artefato de
+  build; não edite o arquivo no servidor. Build:
   `cd deploy/homepage && npm install && npm run build`; o resultado é
   `dist/custom.js`. Detalhes em
   [deploy/homepage/README.md](deploy/homepage/README.md).
