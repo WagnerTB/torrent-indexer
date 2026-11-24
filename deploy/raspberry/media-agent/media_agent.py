@@ -2,10 +2,13 @@
 import ipaddress
 import json
 import os
+import shutil
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,6 +34,15 @@ OS_API_KEY = os.getenv("OS_API_KEY", "")
 BAZARR_CONFIG = os.getenv("BAZARR_CONFIG", "/bazarr/config.yaml")
 BAZARR_URL = os.getenv("BAZARR_URL", "http://127.0.0.1:6767").rstrip("/")
 BAZARR_KEY_FILE = os.getenv("BAZARR_KEY_FILE", "/app/.bazarr_key")
+FFPROBE_PATH = os.getenv("FFPROBE_PATH", "ffprobe")
+BAZARR_ALLOWED_PATHS = (
+    "/api/episodes",
+    "/api/movies",
+    "/api/series",
+    "/api/subtitles",
+    "/api/system/jobs",
+    "/api/system/logs",
+)
 
 RADARR_URL = os.getenv("RADARR_URL", "http://127.0.0.1:7878").rstrip("/")
 SONARR_URL = os.getenv("SONARR_URL", "http://127.0.0.1:8989").rstrip("/")
@@ -40,6 +52,10 @@ RADARR_DUBBED_PROFILE = int(os.getenv("RADARR_DUBBED_PROFILE", "8"))
 SONARR_DUBBED_PROFILE = int(os.getenv("SONARR_DUBBED_PROFILE", "9"))
 RADARR_ORIGINAL_PROFILE = int(os.getenv("RADARR_ORIGINAL_PROFILE", "7"))
 SONARR_ORIGINAL_PROFILE = int(os.getenv("SONARR_ORIGINAL_PROFILE", "7"))
+RADARR_ANIME_LEGENDADO_PROFILE = int(os.getenv("RADARR_ANIME_LEGENDADO_PROFILE", "9"))
+RADARR_ANIME_DUBBED_PROFILE = int(os.getenv("RADARR_ANIME_DUBBED_PROFILE", "10"))
+SONARR_ANIME_LEGENDADO_PROFILE = int(os.getenv("SONARR_ANIME_LEGENDADO_PROFILE", "8"))
+SONARR_ANIME_DUBBED_PROFILE = int(os.getenv("SONARR_ANIME_DUBBED_PROFILE", "10"))
 
 SEERR_URL = os.getenv("SEERR_URL", "http://127.0.0.1:5055").rstrip("/")
 SEERR_CONFIG = os.getenv("SEERR_CONFIG", "/seerr/settings.json")
@@ -138,9 +154,21 @@ def bazarr_api_key():
         return ""
 
 
+def bazarr_path_allowed(path):
+    if not path or "\\" in path or ".." in path:
+        return False
+    try:
+        base = urllib.parse.urlsplit(path).path
+    except ValueError:
+        return False
+    if not base.startswith("/api/"):
+        return False
+    return any(base == allowed or base.startswith(allowed + "/") for allowed in BAZARR_ALLOWED_PATHS)
+
+
 def bazarr_proxy(path, method="GET"):
-    if not path.startswith("/api/"):
-        return 400, "application/json", b'{"error":"invalid path"}'
+    if not bazarr_path_allowed(path):
+        return 403, "application/json", b'{"error":"path not allowed"}'
     key = bazarr_api_key()
     if not key:
         return 500, "application/json", b'{"error":"missing Bazarr API key"}'
@@ -1244,6 +1272,9 @@ def _cli(argv):
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--monitored-only", action="store_true")
     parser.add_argument("--missing-only", action="store_true")
+    parser.add_argument("--audio-check", action="store_true")
+    parser.add_argument("--kind", choices=("movie", "series"))
+    parser.add_argument("--id", type=int)
     args = parser.parse_args(argv)
     if args.backfill_episodes:
         result = backfill_episodes(
@@ -1252,6 +1283,10 @@ def _cli(argv):
             not args.missing_only,
             args.monitored_only,
         )
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0 if result.get("ok") else 1
+    if args.audio_check:
+        result = arr_audio_check(args.kind, args.id, not (args.kind and args.id))
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0 if result.get("ok") else 1
     parser.print_help()
@@ -1817,8 +1852,8 @@ def arr_pending(include_status=False):
             trackable = [
                 item for item in items
                 if item.get("seerr")
-                or (item["kind"] == "movie" and item.get("profileId") == RADARR_DUBBED_PROFILE)
-                or (item["kind"] == "series" and item.get("profileId") == SONARR_DUBBED_PROFILE)
+                or (item["kind"] == "movie" and item.get("profileId") in (RADARR_DUBBED_PROFILE, RADARR_ANIME_DUBBED_PROFILE))
+                or (item["kind"] == "series" and item.get("profileId") in (SONARR_DUBBED_PROFILE, SONARR_ANIME_DUBBED_PROFILE))
             ]
             try:
                 _track_snapshot(trackable)
@@ -1884,13 +1919,353 @@ def arr_search(kind, item_id, profile=None):
 
 
 def arr_switch(kind, item_id):
-    if kind == "movie":
-        profile = RADARR_ORIGINAL_PROFILE
-    elif kind == "series":
-        profile = SONARR_ORIGINAL_PROFILE
-    else:
-        return {"ok": False, "error": "kind invalido"}
-    return arr_search(kind, item_id, profile)
+    try:
+        if kind == "movie":
+            key = arr_key(RADARR_CONFIG)
+            item = arr_request(RADARR_URL, key, f"/api/v3/movie/{int(item_id)}")
+            current = _as_int(item.get("qualityProfileId"))
+            anime = current in (RADARR_ANIME_LEGENDADO_PROFILE, RADARR_ANIME_DUBBED_PROFILE)
+            profile = RADARR_ANIME_LEGENDADO_PROFILE if anime else RADARR_ORIGINAL_PROFILE
+        elif kind == "series":
+            key = arr_key(SONARR_CONFIG)
+            item = arr_request(SONARR_URL, key, f"/api/v3/series/{int(item_id)}")
+            current = _as_int(item.get("qualityProfileId"))
+            anime = (
+                item.get("seriesType") == "anime"
+                or "/animes" in (item.get("rootFolderPath") or "").lower()
+                or current in (SONARR_ANIME_LEGENDADO_PROFILE, SONARR_ANIME_DUBBED_PROFILE)
+            )
+            profile = SONARR_ANIME_LEGENDADO_PROFILE if anime else SONARR_ORIGINAL_PROFILE
+        else:
+            return {"ok": False, "error": "kind invalido"}
+        return arr_search(kind, item_id, profile)
+    except Exception as error:
+        return {"ok": False, "error": f"{type(error).__name__}: {error}"}
+
+
+_AUDIO_LANG_ALIASES = {
+    "en": {"en", "eng", "english"},
+    "pt": {"pt", "por", "pb", "pt-br", "ptbr", "portuguese", "portugues", "português"},
+    "ja": {"ja", "jpn", "jp", "japanese"},
+    "es": {"es", "spa", "spanish", "lat", "latino", "castellano"},
+    "fr": {"fr", "fra", "fre", "french", "francais", "français"},
+}
+
+_VERDICT_PRIORITY = {
+    "ok": 0,
+    "skipped": 1,
+    "ok-multi": 2,
+    "unknown": 3,
+    "wrong-default": 4,
+    "mismatch": 5,
+    "no-audio": 6,
+    "no-file": 7,
+}
+
+
+def _norm_text(value):
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(char for char in text if not unicodedata.combining(char)).lower()
+
+
+def _audio_lang_code(value):
+    code = str(value or "").strip().lower()
+    if not code or code in {"und", "unknown", "none", "null"}:
+        return "und"
+    for canonical, aliases in _AUDIO_LANG_ALIASES.items():
+        if code in aliases:
+            return canonical
+    return code
+
+
+_AUDIO_TITLE_WORDS = {
+    "en": {"english", "eng"},
+    "pt": {"portuguese", "portugues", "português", "pt-br", "ptbr", "brazilian"},
+    "ja": {"japanese", "jpn"},
+    "es": {"spanish", "espanol", "español", "latino", "castellano"},
+    "fr": {"french", "francais", "français"},
+}
+
+
+def _audio_lang_from_title(title):
+    text = _norm_text(title)
+    if not text:
+        return ""
+    for canonical, words in _AUDIO_TITLE_WORDS.items():
+        if any(word in text for word in words):
+            return canonical
+    return ""
+
+
+def _expected_audio(profile_name):
+    name = _norm_text(profile_name)
+    if "anime" in name and "legendado" in name:
+        return {"ja"}
+    if "anime" in name and "dublado" in name:
+        return {"pt"}
+    if "legendado" in name:
+        return {"en"}
+    if "dublado" in name:
+        return {"pt"}
+    return set()
+
+
+def _ffprobe_audio(path):
+    if not path or not os.path.exists(path):
+        return None
+    executable = shutil.which(FFPROBE_PATH)
+    if not executable:
+        return None
+    command = [
+        executable,
+        "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=index,codec_name:stream_tags=language,title:stream_disposition=default,forced",
+        "-of", "json",
+        path,
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    streams = []
+    for stream in payload.get("streams") or []:
+        disposition = stream.get("disposition") or {}
+        tags = stream.get("tags") or {}
+        language = _audio_lang_code(tags.get("language"))
+        title = tags.get("title") or ""
+        if language == "und":
+            language = _audio_lang_from_title(title) or "und"
+        streams.append({
+            "index": _as_int(stream.get("index")),
+            "language": language,
+            "title": title,
+            "default": bool(disposition.get("default")),
+            "forced": bool(disposition.get("forced")),
+            "codec": stream.get("codec_name") or "",
+        })
+    return streams or None
+
+
+def _media_info_audio(media_info):
+    if not media_info:
+        return []
+    raw = str(media_info.get("audioLanguages") or "")
+    separators = raw.replace(";", ",").replace("/", ",").replace("|", ",")
+    codes = [
+        _audio_lang_code(part)
+        for part in separators.split(",")
+        if part.strip()
+    ]
+    count = max(_as_int(media_info.get("audioStreamCount")) or 0, len(codes))
+    if not count:
+        return []
+    streams = []
+    for index in range(count):
+        streams.append({
+            "index": index,
+            "language": codes[index] if index < len(codes) else "und",
+            "default": index == 0,
+            "forced": False,
+            "codec": str(media_info.get("audioCodec") or ""),
+        })
+    return streams
+
+
+def _audio_streams_for_file(media_file):
+    path = media_file.get("path") or ""
+    streams = _ffprobe_audio(path)
+    if streams:
+        return streams, "ffprobe"
+    return _media_info_audio(media_file.get("mediaInfo") or {}), "mediaInfo"
+
+
+def _audio_verdict(expected, streams):
+    if not streams:
+        return "no-audio", "Nenhuma faixa de áudio encontrada"
+    if not expected:
+        return "skipped", "Perfil sem expectativa de áudio"
+    languages = [stream.get("language") or "und" for stream in streams]
+    known = sorted({language for language in languages if language != "und"})
+    default_stream = next((stream for stream in streams if stream.get("default")), streams[0])
+    default_lang = default_stream.get("language") or "und"
+    expected_text = ", ".join(sorted(expected))
+    if not known:
+        return "unknown", "Faixas sem idioma identificado (und); confira manualmente"
+    if default_lang == "und":
+        return "unknown", "Faixa padrão sem idioma; confira manualmente"
+    if default_lang not in expected:
+        if any(language in expected for language in known):
+            return "wrong-default", f"Áudio esperado ({expected_text}) existe, mas a faixa padrão é {default_lang}"
+        return "mismatch", f"Áudio esperado ({expected_text}) ausente; encontrado: {', '.join(known)}"
+    if len(known) > 1:
+        return "ok-multi", f"Faixa padrão correta ({default_lang}); há outras faixas: {', '.join(known)}"
+    return "ok", f"Faixa padrão: {default_lang}"
+
+
+def _profile_names(base, key):
+    return {
+        _as_int(profile.get("id")): profile.get("name") or ""
+        for profile in _quality_profiles(base, key)
+    }
+
+
+def _audio_check_movie(movie, profile_names):
+    profile_id = _as_int(movie.get("qualityProfileId"))
+    profile_name = profile_names.get(profile_id, "")
+    media_file = movie.get("movieFile") or {}
+    result = {
+        "kind": "movie",
+        "id": movie.get("id"),
+        "title": movie.get("title") or "",
+        "year": movie.get("year"),
+        "profileId": profile_id,
+        "profileName": profile_name,
+        "originalLanguage": (movie.get("originalLanguage") or {}).get("name") or "",
+        "expected": sorted(_expected_audio(profile_name)),
+        "hasFile": bool(media_file),
+    }
+    if not media_file:
+        result.update({"verdict": "no-file", "message": "Sem arquivo importado", "streams": [], "actual": []})
+        return result
+    streams, source = _audio_streams_for_file(media_file)
+    verdict, message = _audio_verdict(set(result["expected"]), streams)
+    result.update({
+        "file": media_file.get("path") or "",
+        "source": source,
+        "streams": streams,
+        "actual": sorted({stream.get("language") or "und" for stream in streams}),
+        "verdict": verdict,
+        "message": message,
+    })
+    return result
+
+
+def _audio_check_series(series, profile_names, key):
+    profile_id = _as_int(series.get("qualityProfileId"))
+    profile_name = profile_names.get(profile_id, "")
+    expected = _expected_audio(profile_name)
+    stats = series.get("statistics") or {}
+    result = {
+        "kind": "series",
+        "id": series.get("id"),
+        "title": series.get("title") or "",
+        "year": series.get("year"),
+        "profileId": profile_id,
+        "profileName": profile_name,
+        "originalLanguage": (series.get("originalLanguage") or {}).get("name") or "",
+        "expected": sorted(expected),
+        "hasFile": bool(stats.get("episodeFileCount")),
+    }
+    files = []
+    if result["hasFile"]:
+        files = arr_request(SONARR_URL, key, f"/api/v3/episodefile?seriesId={int(series.get('id'))}") or []
+    if not files:
+        result.update({"verdict": "no-file", "message": "Sem arquivo importado", "files": []})
+        return result
+    checks = []
+    for media_file in files:
+        streams, source = _audio_streams_for_file(media_file)
+        verdict, message = _audio_verdict(expected, streams)
+        checks.append({
+            "file": media_file.get("path") or "",
+            "season": media_file.get("seasonNumber"),
+            "source": source,
+            "streams": streams,
+            "actual": sorted({stream.get("language") or "und" for stream in streams}),
+            "verdict": verdict,
+            "message": message,
+        })
+    worst = max((check["verdict"] for check in checks), key=lambda value: _VERDICT_PRIORITY.get(value, 9))
+    counts = {}
+    for check in checks:
+        counts[check["verdict"]] = counts.get(check["verdict"], 0) + 1
+    result.update({
+        "files": checks,
+        "actual": sorted({
+            stream.get("language") or "und"
+            for check in checks
+            for stream in check.get("streams") or []
+        }),
+        "verdict": worst,
+        "message": ", ".join(f"{name}: {count}" for name, count in sorted(counts.items())),
+    })
+    return result
+
+
+def _audio_summary(results, errors):
+    counts = {}
+    problems = []
+    for item in results:
+        verdict = item.get("verdict") or "unknown"
+        counts[verdict] = counts.get(verdict, 0) + 1
+        if verdict not in ("ok", "ok-multi", "skipped"):
+            problems.append(item)
+    payload = {
+        "ok": True,
+        "total": len(results),
+        "counts": counts,
+        "problems": problems,
+        "errors": errors,
+        "ffprobe": bool(shutil.which(FFPROBE_PATH)),
+    }
+    if len(results) == 1:
+        payload["item"] = results[0]
+    return payload
+
+
+def arr_audio_check(kind=None, item_id=None, all_items=False):
+    try:
+        if kind not in (None, "movie", "series"):
+            return {"ok": False, "error": "kind invalido"}
+        results = []
+        errors = []
+        if kind and item_id:
+            if kind == "movie":
+                key = arr_key(RADARR_CONFIG)
+                movie = arr_request(RADARR_URL, key, f"/api/v3/movie/{int(item_id)}")
+                results.append(_audio_check_movie(movie, _profile_names(RADARR_URL, key)))
+            else:
+                key = arr_key(SONARR_CONFIG)
+                series = arr_request(SONARR_URL, key, f"/api/v3/series/{int(item_id)}")
+                results.append(_audio_check_series(series, _profile_names(SONARR_URL, key), key))
+        elif all_items or kind:
+            if kind in (None, "movie"):
+                key = arr_key(RADARR_CONFIG)
+                if key:
+                    names = _profile_names(RADARR_URL, key)
+                    for movie in arr_request(RADARR_URL, key, "/api/v3/movie") or []:
+                        if movie.get("movieFile"):
+                            results.append(_audio_check_movie(movie, names))
+            if kind in (None, "series"):
+                key = arr_key(SONARR_CONFIG)
+                if key:
+                    names = _profile_names(SONARR_URL, key)
+                    series_list = [
+                        series for series in (arr_request(SONARR_URL, key, "/api/v3/series") or [])
+                        if (series.get("statistics") or {}).get("episodeFileCount")
+                    ]
+                    with ThreadPoolExecutor(max_workers=4) as pool:
+                        futures = [
+                            pool.submit(_audio_check_series, series, names, key)
+                            for series in series_list
+                        ]
+                        for future in futures:
+                            try:
+                                results.append(future.result())
+                            except Exception as error:
+                                errors.append(f"{type(error).__name__}: {error}")
+        else:
+            return {"ok": False, "error": "informe kind+id ou all=1"}
+        return _audio_summary(results, errors)
+    except Exception as error:
+        return {"ok": False, "error": f"{type(error).__name__}: {error}"}
 
 
 
@@ -1960,6 +2335,13 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
             self._json(200, requests_payload(params))
+        elif self.path.startswith("/arr/audio-check"):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            kind = (params.get("kind") or [None])[0]
+            item_id = _as_int((params.get("id") or [None])[0])
+            all_items = (params.get("all") or ["0"])[0].lower() in ("1", "true", "yes")
+            self._json(200, arr_audio_check(kind, item_id, all_items))
         elif self.path.startswith("/arr/pending"):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)

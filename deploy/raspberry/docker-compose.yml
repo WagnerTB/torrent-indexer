@@ -302,7 +302,8 @@ services:
     logging: *default-logging
 
   media-agent:
-    image: python:3.12-alpine
+    build: ./media-agent
+    image: media-agent:local
     restart: unless-stopped
     network_mode: host
     environment:
@@ -322,6 +323,10 @@ services:
       SONARR_DUBBED_PROFILE: "9"
       RADARR_ORIGINAL_PROFILE: "7"
       SONARR_ORIGINAL_PROFILE: "7"
+      RADARR_ANIME_LEGENDADO_PROFILE: "9"
+      RADARR_ANIME_DUBBED_PROFILE: "10"
+      SONARR_ANIME_LEGENDADO_PROFILE: "8"
+      SONARR_ANIME_DUBBED_PROFILE: "10"
       STATE_DIR: /state
       OS_API_KEY: ${OS_API_KEY:-}
       STORAGE_CONFIG: '[{"id":"ssd01","label":"SSD 01","kind":"SSD","parts":[{"label":"Mídia","path":"/host/pimedia-probe"},{"label":"Docker","path":"/"}]},{"id":"system","label":"Sistema","kind":"microSD","parts":[{"label":"Sistema","path":"/host/root-probe"}]}]'
@@ -336,6 +341,7 @@ services:
       - ${CONFIG_ROOT}/radarr/config.xml:/radarr/config.xml:ro
       - ${CONFIG_ROOT}/sonarr2/config.xml:/sonarr/config.xml:ro
       - ${CONFIG_ROOT}/seerr:/seerr:ro
+      - ${MEDIA_ROOT}:/media:ro
     command: ["python3", "/app/media_agent.py"]
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import socket; socket.create_connection(('127.0.0.1',8097),3).close()\" || exit 1"]
@@ -345,7 +351,7 @@ services:
       start_period: 60s
     labels:
       - autoheal=true
-    mem_limit: 96m
+    mem_limit: 128m
     logging: *default-logging
 
 

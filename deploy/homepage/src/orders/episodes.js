@@ -108,8 +108,8 @@ export function createEpisodes(ctx) {
     subEl.textContent = parts.join(' • ');
     body.innerHTML = '';
 
-    if (series.profileId !== 9) {
-      body.appendChild(h('div', 'hx-warn', 'Perfil atual: ' + profile + ' (não será alterado). Para dublado, adicione usando o perfil Séries - Dublado.'));
+    if (series.profileId !== 9 && series.profileId !== 10) {
+      body.appendChild(h('div', 'hx-warn', 'Perfil atual: ' + profile + ' (não será alterado). Para dublado, use Dublado (ou Anime-Dublado em anime).'));
     }
     if (!episodes.length) {
       body.appendChild(h('div', 'hx-muted', 'Nenhum episódio encontrado no Sonarr.'));
@@ -308,7 +308,7 @@ export function createEpisodes(ctx) {
           + (result.unmonitored ? ', ' + countLabel(Number(result.unmonitored) || 0, 'desmarcado', 'desmarcados') : '')
           + (searchAfter.checked ? '; busca iniciada' : ''));
         closeEpisodes();
-        if (series.profileId === 9) helpers.load(true);
+        if (series.profileId === 9 || series.profileId === 10) helpers.load(true);
       } catch (e) {
         toast('Erro: ' + e.message, false);
       } finally {

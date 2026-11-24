@@ -2,7 +2,7 @@
 
 > **Nota de segurança:** IPs, MACs, usuários e caminhos absolutos foram substituídos por placeholders. Os valores reais ficam no `.env`/config local, fora do git. A senha do WOL agora usa `GAMING_PASSWORD` no `.env`; `.gaming_password` é fallback legado. Veja `SECURITY_AUDIT.md`.
 
-Última atualização: 2026-10-26
+Última atualização: 2026-11-02
 
 Documentos relacionados:
 
@@ -307,28 +307,46 @@ Custom formats (Radarr e Sonarr):
 
 | ID | Nome | Regex | Uso |
 |---|---|---|---|
-| 1 | `PT-BR Dublado` | `(?i)\b(dublado|dublagem|nacional|pt[- ]?br|ptbr|portugu[eê]s|portugues|brazilian)\b` | positivo no perfil dublado, negativo no original/anime |
-| 2 | `English Dub` | `(?i)(english[ .-]?dub|dubbed|\bdub\b)` | negativo no original/anime |
-| 3 | `Dual Audio` | `(?i)\bdual\b` | aceita releases “Dual” nos perfis dublados |
-| 4 | `Latino/Espanhol` | `(?i)\b(lat|latam|latino|latinoamericano|castellano|espanhol|español|spanish)\b` | negativo nos perfis dublados |
+| 1 | `PT-BR Dublado` | `(?i)\b(dublado|dublagem|nacional|pt[- ]?br|ptbr|portugu[eê]s|portugues|brazilian)\b` | +100 em `Dublado`/`Anime-Dublado`; -100 nos legendados |
+| 2 | `English Dub` | `(?i)(english[ .-]?dub|dubbed|\bdub\b)` | -100 nos legendados; 0 nos dublados |
+| 3 | `Dual Audio` | `(?i)\bdual\b` | +50 nos dublados; 0 em `Anime-Legendado`; -100 em `Legendado` |
+| 4 | `Latino/Espanhol` | `(?i)\b(lat|latam|latino|latinoamericano|castellano|espanhol|español|spanish)\b` | -100 nos quatro perfis |
 
-Perfis:
+Perfis (4 por app, aplicado em 2026-11-02):
 
 - **Radarr**
-  - `Filmes - Original` (id 7): PT-BR −100, English −100, Dual 0; mínimo 0.
-  - `Animação - Dublado` (id 8): PT-BR 100, English 0, Dual 50, Latino
-    −100; mínimo 100; cutoff 100.
-- **Sonarr**
-  - `Séries - Original` (id 7): PT-BR −100, English −100, Dual 0; mínimo 0.
-  - `Anime - Japonês` (id 8): PT-BR −100, English −100, Dual 0; mínimo 0.
-  - `Séries - Dublado` (id 9): PT-BR 100, English 0, Dual 50, Latino −100;
+  - `Legendado` (id 7): PT-BR -100, English Dub -100, Dual -100,
+    Latino -100; mínimo 0; cutoff 0.
+  - `Dublado` (id 8): PT-BR +100, English Dub 0, Dual +50, Latino -100;
     mínimo 100; cutoff 100.
+  - `Anime-Legendado` (id 9): PT-BR -100, English Dub -100, Dual 0,
+    Latino -100; mínimo 0; cutoff 0.
+  - `Anime-Dublado` (id 10): PT-BR +100, English Dub 0, Dual +50,
+    Latino -100; mínimo 100; cutoff 100.
+- **Sonarr**
+  - `Legendado` (id 7): PT-BR -100, English Dub -100, Dual -100,
+    Latino -100; mínimo 0; cutoff 0.
+  - `Anime-Legendado` (id 8): PT-BR -100, English Dub -100, Dual 0,
+    Latino -100; mínimo 0; cutoff 0.
+  - `Dublado` (id 9): PT-BR +100, English Dub 0, Dual +50, Latino -100;
+    mínimo 100; cutoff 100.
+  - `Anime-Dublado` (id 10): PT-BR +100, English Dub 0, Dual +50,
+    Latino -100; mínimo 100; cutoff 100.
 
-No **Seerr**, os defaults são: Radarr `Filmes - Original` (7), Sonarr
-`Séries - Original` (7), anime `Anime - Japonês` (8). Para animação dublada,
-escolher no pedido `Animação - Dublado` (filme) ou `Séries - Dublado` (série).
-Se o dropdown não listar os perfis novos, abrir Settings → Services →
-Radarr/Sonarr e clicar **Test/Save** uma vez para recarregar.
+Qualidade dos 4 perfis: 1080p (HDTV/WEB/BluRay) com fallback 720p
+(HDTV/WEB/BluRay); sem Remux e sem 4K; `upgradeAllowed=true`, cutoff
+`Bluray-1080p` (7).
+
+No **Seerr**, os defaults continuam: Radarr `Legendado` (7), Sonarr
+`Legendado` (7), anime `Anime-Legendado` (8). Para dublado, escolher
+`Dublado` ou `Anime-Dublado` no pedido. Os perfis antigos `1-6` foram
+excluídos após migrar os itens.
+
+Se o dropdown do Seerr ainda mostrar os nomes antigos, abrir Settings →
+Services → Radarr/Sonarr e clicar **Test/Save** uma vez.
+
+> Histórico: o teste do Minions e o caso do Jack abaixo se referem aos perfis
+> antigos (`Animação - Dublado` / `Séries - Dublado`), mantidos como registro.
 
 Teste real (Minions 2015, perfil 8): 162 releases, 6 aceitos. Exemplos:
 
@@ -516,8 +534,8 @@ Bazarr em `http://<LAN_IP>:6767`, config
     **Somente sem arquivo**, escopo de **Marcar não baixados**, confirmação
     com contagem e badge **Pedido** nos episódios já rastreados; acima de 20
     episódios o **Aplicar** também pede confirmação;
-  - **Buscar original** pede confirmação explícita (muda para o perfil Original
-    e o item sai dos perfis dublados);
+  - **Buscar original** pede confirmação explícita (muda para `Legendado` ou,
+    em anime, `Anime-Legendado`, e o item sai dos perfis dublados);
   - aba **Legendas**: quota da OpenSubtitles, busca por série ou episódio,
     agrupamento por série, pendências, fila local (`localStorage`), feedback
     do Bazarr e sincronização de legendas existentes;
@@ -608,8 +626,9 @@ Bazarr em `http://<LAN_IP>:6767`, config
   - `POST /arr/check` `{"kind":"movie|series","id":N}`: consulta
     `/api/v3/release` no *arr e retorna quantos releases foram aceitos.
   - `POST /arr/search` `{"kind","id"}`: dispara a busca no perfil atual.
-  - `POST /arr/switch` `{"kind","id"}`: troca o item para o perfil Original
-    (Radarr 7 / Sonarr 7) e dispara a busca.
+  - `POST /arr/switch` `{"kind","id"}`: troca para `Legendado` (Radarr 7 /
+    Sonarr 7) ou, se for anime (`seriesType`, pasta `/media/animes` ou perfil
+    Anime-*), para `Anime-Legendado` (Radarr 9 / Sonarr 8); dispara a busca.
   - `GET /sonarr/options`: perfis de qualidade e pastas raiz do Sonarr.
   - `GET /sonarr/lookup?term=...`: busca séries no Sonarr/TVDB, marcando as que
     já existem e o perfil atual.
@@ -624,6 +643,20 @@ Bazarr em `http://<LAN_IP>:6767`, config
     `EpisodeSearch` só neles.
   - `GET/PATCH /bazarr?path=/api/...`: proxy para a API do Bazarr; a
     `X-API-KEY` é adicionada no servidor a partir de `.bazarr_key`.
+
+  - O proxy `/bazarr` aceita apenas `/api/episodes`, `/api/movies`,
+    `/api/series`, `/api/subtitles`, `/api/system/jobs` e `/api/system/logs`;
+    `/api/system/settings` e demais rotas sao bloqueadas (403).
+    Aplicado no Pi em 2026-11-02.
+
+  - `GET /arr/audio-check?kind=movie|series&id=N` e `?all=1`: valida o
+    idioma do audio contra o perfil (`Legendado`=en, `Dublado`=pt,
+    `Anime-Legendado`=ja). Usa ffprobe (idioma, titulo da faixa e faixa
+    default) com fallback para `mediaInfo.audioLanguages`. Vereditos:
+    `ok`, `ok-multi`, `unknown`, `wrong-default`, `mismatch`, `no-audio`,
+    `no-file`. Arquivos sem tag (`und`) saem como `unknown` e precisam de
+    conferencia manual. CLI: `python3 /app/media_agent.py --audio-check`.
+    Aplicado no Pi em 2026-11-02 (ffprobe + volume `/media:ro`).
 
 ## 10.2 Media gateway (proxy de títulos alternativos)
 
@@ -666,9 +699,8 @@ Bazarr em `http://<LAN_IP>:6767`, config
 
 ## 12. Fluxo de um pedido
 
-1. Você pesquisa no Seerr e escolhe o perfil (`Filmes - Original`,
-   `Animação - Dublado`, `Séries - Original`, `Séries - Dublado` ou
-   `Anime - Japonês`).
+1. Você pesquisa no Seerr e escolhe o perfil (`Legendado`, `Dublado`,
+   `Anime-Legendado` ou `Anime-Dublado`).
 2. O Seerr cria o request no Radarr/Sonarr.
 3. O *arr adiciona o título, procura no Prowlarr e manda o release para o
    qBittorrent.
@@ -756,7 +788,8 @@ Bazarr em `http://<LAN_IP>:6767`, config
 8. **Commit**: `api/torznab.go` (categorias + fallback) e os docs estão
    alterados no working tree; revisar e commitar.
 9. **Compose versionado**: o `deploy/raspberry/docker-compose.yml` foi
-   atualizado em 2026-10-26; manter sincronizado com o compose vivo.
+   atualizado em 2026-11-02 (media-agent com build, ffmpeg, `/media:ro` e
+   128 MB); no Pi o build context é `/srv/PiMedia/docker/media-agent`.
 10. **UI**: etapas 1, 0.5, 2, 3, 4, 5, 6 e 7 concluídas. O estado da
     sub-aba/filtros na URL e o tema claro seguem opcionais.
 10. Itens órfãos de `/media/downloads` e `/media/docker` no banco do Jellyfin;
@@ -768,12 +801,25 @@ Bazarr em `http://<LAN_IP>:6767`, config
 12. **Jellyfin/FUSE**: o realtime não recebe eventos no NTFS-3G; o scan de
     30 min cobre a importação e o hook **Jellyfin Refresh** atualiza na hora.
     Se o hook for desativado, o fallback é o scan de 30 min.
-13. **Áudio PT-BR**: os perfis dublados agora exigem PT-BR (mínimo 100) e
-    rejeitam `Latino/Espanhol`. O proxy **PT-BR Alternate Titles** no
-    `media-gateway` encontra o release do Jack no Rede Torrent (11 seeders) e o
-    Radarr o aceita com score 100; `/arr/check` retorna **1 aceito de 160**,
-    mas ainda não foi baixado. O painel **Pedidos** permite trocar para o
-    perfil Original e buscar quando não houver PT-BR aceito.
+13. **Áudio PT-BR**: os perfis `Dublado`/`Anime-Dublado` exigem PT-BR
+    (mínimo 100) e rejeitam `Latino/Espanhol`. O proxy **PT-BR Alternate
+    Titles** no `media-gateway` segue disponível para achar releases
+    brasileiros. O item do Jack está no perfil `Dublado` (8) com áudio PT;
+    o painel **Pedidos** permite trocar para `Legendado` e buscar quando
+    não houver PT-BR aceito.
+
+14. **Decisão de idioma por IA (ideia futura)**: usar o **Motorola One
+    Vision** sobrando como nó de identificação de idioma (LID), não como
+    servidor Jellyfin. Motivo: o Pi 4 já fica em 90%+ no transcode de HEVC
+    10-bit (Rare Exports) e não se quer adicionar carga. Setup: Termux +
+    Python + ONNX Runtime com Silero LID/SpeechBrain VoxLingua107, ou
+    whisper.cpp tiny; o `media-agent` extrai 60 s de áudio com ffmpeg e
+    envia por Tailscale; o celular devolve o idioma provável. Resolve os
+    `und` (Angel-A, Gran Turismo) sem ouvir manualmente. Limitações:
+    acurácia probabilística, conteúdo sem fala (Flow), bateria/thermal,
+    não serve para transcode; o celular já faz direct play HEVC 10-bit.
+    Alternativa: LineageOS/e/OS + Termux/proot (postmarketOS não tem port
+    para `kane`).
 
 ## 16. Comandos úteis
 
@@ -805,7 +851,28 @@ curl -s -H "X-API-KEY: <BAZARR_API_KEY>" \
   http://<LAN_IP>:6767/api/system/status
 ```
 
-## 17. Histórico das implementações (2026-10-26)
+## 17. Histórico das implementações
+
+### 2026-11-02
+
+- Perfis reduzidos a 4 por app: `Legendado`, `Dublado`, `Anime-Legendado` e
+  `Anime-Dublado` (Radarr 7-10; Sonarr 7-10). Perfis `1-6` excluídos.
+- Itens migrados: Buddy 4→7, Demon Slayer 7→9, Suits 6→7, Bleach 6→8;
+  City of God, Minions e Nightmare mantidos em `Dublado` (8).
+- Qualidade: 1080p (HDTV/WEB/BluRay) + fallback 720p; sem Remux/4K;
+  `upgradeAllowed=true`, cutoff `Bluray-1080p` (7).
+- `media-agent`: `/arr/audio-check` com ffprobe e volume `/media:ro`;
+  proxy `/bazarr` com allowlist (`/api/system/settings` → 403);
+  `arr_switch` distingue anime; tracking inclui `Anime-Dublado`; 128 MB.
+- Homepage: `episodes.js` reconhece `Anime-Dublado` (10); bundle publicado
+  em `/api/config/custom.js`.
+- Seerr: nomes cacheados atualizados (`Legendado`/`Anime-Legendado`);
+  IDs 7/7/8 mantidos.
+- Redis: AOF corrompido corrigido com `redis-check-aof --fix`; backup em
+  `/tmp/redis-backup/`.
+
+### 2026-10-26
+
 
 - Correção do Bazarr/OpenSubtitles (senha da conta, não API key), perfil PT-BR
   (`pb`, antes `pt`), `minimum_score` 70, CORS.

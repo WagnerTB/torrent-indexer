@@ -349,13 +349,13 @@ com `&` e `%20`.
 - Jellyfin: o realtime não funciona no mount FUSE/NTFS-3G; o scan agendado roda
   a cada 30 min e o hook **Jellyfin Refresh** no Radarr/Sonarr atualiza o item
   na hora após import/upgrade/rename.
-- Perfis dublados (Radarr `Animação - Dublado` e Sonarr `Séries - Dublado`)
+- Perfis dublados (Dublado/Anime-Dublado)
   exigem PT-BR desde 2026-10-26 (mínimo 100) e rejeitam `Latino/Espanhol`.
   O Homepage tem abas no topo **Início**, **Pedidos** e **Legendas**; a aba
   Pedidos cruza todos os perfis do Radarr/Sonarr com os pedidos do Seerr
   (pendente, aprovado, recusado ou falhou), tem filtros por tipo/perfil/status
   em Ativos e Histórico, paginação de 10 itens em Ativos, verifica releases
-  PT-BR e permite trocar para o perfil Original e buscar quando não houver. Também busca séries/animes no
+  PT-BR e permite trocar para Legendado/Anime-Legendado e buscar quando não houver. Também busca séries/animes no
   Sonarr, adiciona com o perfil escolhido sem monitorar tudo e permite marcar e
   buscar episódios específicos. O `custom.js` é buildado a partir de
   `deploy/homepage/src` (ver [deploy/homepage/README.md](deploy/homepage/README.md)).
