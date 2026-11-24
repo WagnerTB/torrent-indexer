@@ -25,7 +25,7 @@ import (
 
 var vacaTorrent = IndexerMeta{
 	Label:       "vaca_torrent",
-	URL:         utils.GetIndexerURLFromEnv("INDEXER_VACA_TORRENT_URL", "https://vacatorrentmov.com/"),
+	URL:         utils.GetIndexerURLFromEnv("INDEXER_VACA_TORRENT_URL", "https://vaqueirofilmes.com/"),
 	SearchURL:   "wp-admin/admin-ajax.php",
 	PagePattern: "page/%s",
 }
@@ -114,7 +114,7 @@ func (i *Indexer) HandlerVacaTorrentIndexer(w http.ResponseWriter, r *http.Reque
 		if strings.Contains(strings.ToLower(doc.Find("title").Text()), "vaqueiro") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "vaca_torrent domain no longer serves the expected site (it redirects to vaqueirofilmes1.com); set INDEXER_VACA_TORRENT_URL to a working domain"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "vaca_torrent foi descontinuado: o domínio agora é Vaqueiro Filmes e não expõe magnet links"})
 			i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
 			return
 		}
@@ -215,8 +215,9 @@ func postSearchVacaTorrent(ctx context.Context, i *Indexer, targetURL, query, pa
 	var ajaxResp VacaTorrentAjaxResponse
 	err = json.Unmarshal(bodyBytes, &ajaxResp)
 	if err != nil {
-		if strings.Contains(strings.ToLower(string(bodyBytes)), "vaqueiro") {
-			return nil, fmt.Errorf("vaca_torrent domain no longer serves the expected site (it redirects to vaqueirofilmes1.com); set INDEXER_VACA_TORRENT_URL to a working domain")
+		lowerBody := strings.ToLower(string(bodyBytes))
+		if strings.Contains(lowerBody, "vaqueiro") || strings.TrimSpace(lowerBody) == "0" {
+			return nil, fmt.Errorf("vaca_torrent foi descontinuado: o domínio agora é Vaqueiro Filmes e não expõe magnet links")
 		}
 		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}

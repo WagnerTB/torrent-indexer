@@ -4,6 +4,7 @@ param(
     [string]$Query = "matrix",
     [string[]]$Indexers = @(
         "torrent-dos-filmes",
+        "baixarapido",
         "rede_torrent",
         "starck-filmes",
         "comando_torrents",

@@ -150,23 +150,27 @@ Prowlarr em `http://<LAN_IP>:9696`. App Profile **Standard** com
 `minimumSeeders = 1`. Apps `Radarr` e `Sonarr` com `syncLevel: fullSync`.
 O Prowlarr conversa com o `torrent-indexer` em `http://torrent-indexer:7006`.
 
-| Indexador | URL/Prowlarr | Status em 2026-10-26 |
+| Indexador | URL/Prowlarr | Status em 2026-11-24 |
 |---|---|---|
 | Rede Torrent | `Torznab` `http://torrent-indexer:7006`, `apiPath=/api` | Funciona; no Radarr e Sonarr |
 | Torrent dos Filmes | `apiPath=/api/torrent-dos-filmes` | Funciona; no Radarr e Sonarr |
 | Starck Filmes | `apiPath=/api/starck-filmes` | Funciona; no Radarr e Sonarr (só filmes) |
+| Baixarapido | `apiPath=/api/baixarapido` | Funciona; no Radarr e Sonarr |
 | The Pirate Bay | nativo | Funciona; Radarr e Sonarr |
 | Torrentio | nativo | Funciona; Radarr e Sonarr |
-| 1337x | nativo | Falha no Radarr por FlareSolverr/Cloudflare |
+| 1337x | nativo | Funciona com o proxy FlareSolverr (`solvearr`); no Radarr e Sonarr |
+| UIndex | nativo | Funciona via proxy FlareSolverr; no Radarr e Sonarr |
+| YTS | nativo | Funciona; no Radarr (filmes) |
 | BluDV | não adicionado | Cloudflare resolvido, mas o download usa gate `gate/go` → `promobr.online`/`x.gd`; retorna 0 |
 | Comando Torrents | `apiPath=/api/comando_torrents` | Funciona com FlareSolverr oficial; no Radarr e Sonarr |
-| Vaca Torrent | — | Domínio morto |
+| Vaca Torrent | — | Descontinuado: `vaqueirofilmes.com` virou streaming e não expõe magnets |
 | Filme Torrent | — | Só nome em `IndexerNames`; sem handler |
 | Dodo Filmes | — | Não existe no código atual |
 
-Resumo atual: **Radarr tem 7 indexadores** (Comando, Rede, Torrent dos Filmes,
-Starck, TPB, Torrentio e o proxy **PT-BR Alternate Titles**) e **Sonarr tem 6**
-(Comando, Rede, Torrent dos Filmes, Starck, TPB, Torrentio), todos com
+Resumo atual: **Radarr tem 11 indexadores** (1337x, Baixarapido, Comando,
+Rede, Torrent dos Filmes, Starck, TPB, Torrentio, UIndex, YTS e o proxy
+**PT-BR Alternate Titles**) e **Sonarr tem 9** (1337x, Baixarapido, Comando,
+Rede, Torrent dos Filmes, Starck, TPB, Torrentio e UIndex), todos com
 `minimumSeeders = 1`, exceto o proxy (0).
 
 ### 4.1 Torznab customizado no Prowlarr
@@ -182,6 +186,7 @@ Os indexadores brasileiros do `torrent-indexer` são adicionados como
   - Torrent dos Filmes: `/api/torrent-dos-filmes`
   - Starck Filmes: `/api/starck-filmes`
   - Comando Torrents: `/api/comando_torrents`
+  - Baixarapido: `/api/baixarapido`
 
 Após adicionar, rodar no Prowlarr o comando **ApplicationIndexerSync** e
 conferir em Radarr/Sonarr → Settings → Indexers. O Prowlarr testa cada
@@ -190,9 +195,10 @@ resultado nas categorias configuradas.
 
 O Sonarr perdeu Rede/1337x em uma sincronização porque o teste vazio usava o
 fallback `q=2024`; o fallback do Torznab foi alterado para `q=a`, e o Rede
-voltou. Em 2026-10-26 Comando, Torrent dos Filmes e Starck aparecem no Sonarr
-(6 indexadores), mas o Starck é só filmes. O 1337x continua fora do
-Radarr/Sonarr e depende do FlareSolverr.
+voltou. Em 2026-11-24 os dois apps estão com todos os indexadores esperados:
+Radarr 11 e Sonarr 9. O 1337x foi recuperado depois de corrigir os proxies do
+Prowlarr para `http://solvearr:8191/`; ele usa o proxy e pode levar ~110s na
+primeira busca.
 
 ### 4.2 FlareSolverr oficial e Comando
 
@@ -209,6 +215,9 @@ Radarr/Sonarr e depende do FlareSolverr.
 - `BluDV`: o Cloudflare é resolvido, mas o link “Magnet-Link” vai para
   `gate/go` → `promobr.online` → `x.gd` e não expõe o magnet de forma
   automatizável; continua fora do Prowlarr.
+- Os proxies do Prowlarr (`FlareSolverr` e `Solverr`) apontavam para
+  `http://192.168.1.10:8191/`; foram corrigidos para `http://solvearr:8191/`
+  com timeout de 180s. Isso recuperou o 1337x e permitiu adicionar o UIndex.
 
 ## 5. Torrent-indexer: mudanças no Torznab
 
@@ -251,6 +260,8 @@ Teste de categorias:
 
 ```bash
 curl -s 'http://<LAN_IP>:8080/indexers/bludv?q=minions'
+curl -s 'http://<LAN_IP>:8080/indexers/baixarapido?q=matrix'
+curl -s 'http://<LAN_IP>:8080/api/baixarapido?t=search&q=matrix' | grep category
 curl -s 'http://<LAN_IP>:8080/api/rede_torrent?t=search&q=minions' | grep category
 ```
 
@@ -771,12 +782,15 @@ Bazarr em `http://<LAN_IP>:6767`, config
 2. **Seerr**: adicionar o widget do Seerr no Homepage com a API key; sincronizar
    a biblioteca **Animes** no Jellyfin pelo Seerr (Settings → Jellyfin →
    Sync Libraries).
-3. **Sonarr**: já está com 6 indexadores (Comando, Torrent dos Filmes, Starck,
-   Rede, TPB, Torrentio); validar se Comando/Torrent dos Filmes retornam TV
-   dublada na prática. O Starck é só filmes e o 1337x depende do FlareSolverr.
-4. **Indexadores**: Comando voltou (FlareSolverr oficial + sessão + timeout
-   180s). BluDV continua atrás do gate `promobr/x.gd`; Vaca morto; Filme
-   Torrent sem handler; Dodo não existe. Decidir se implementa/remove.
+3. **Sonarr**: já está com 9 indexadores (1337x, Baixarapido, Comando, Torrent
+   dos Filmes, Starck, Rede, TPB, Torrentio e UIndex); validar se
+   Comando/Torrent dos Filmes retornam TV dublada na prática. O Starck é só
+   filmes.
+4. **Indexadores**: Baixarapido implementado e adicionado ao Prowlarr/Radarr/
+   Sonarr; Comando voltou (FlareSolverr oficial + sessão + timeout 180s).
+   BluDV continua atrás do gate `promobr/x.gd`; Vaca Torrent foi descontinuado
+   (`vaqueirofilmes.com`, sem magnets); XTerFilmes também usa gate de anúncio;
+   Filme Torrent sem handler; Dodo não existe.
 5. **Seeds**: o Torrent dos Filmes não informa seeders no Radarr (mostra
    vazio); preferir Torrentio/TPB quando for escolher manualmente. O
    `minSeeds=1` está no App Profile do Prowlarr e nos *arr.
@@ -785,8 +799,9 @@ Bazarr em `http://<LAN_IP>:6767`, config
    próprio.
 7. **Fila de legendas**: é do navegador; se quiser execução em background,
    criar um cron/serviço no agente.
-8. **Commit**: `api/torznab.go` (categorias + fallback) e os docs estão
-   alterados no working tree; revisar e commitar.
+8. **Docs**: atualizados em 2026-11-24 com o Baixarapido, o estado do Vaca
+   Torrent (descontinuado), o XTerFilmes (gate de anúncio) e a recuperação do
+   1337x/YTS/UIndex. Commit feito junto com o handler.
 9. **Compose versionado**: o `deploy/raspberry/docker-compose.yml` foi
    atualizado em 2026-11-02 (media-agent com build, ffmpeg, `/media:ro` e
    128 MB); no Pi o build context é `/srv/PiMedia/docker/media-agent`.
@@ -885,8 +900,13 @@ curl -s -H "X-API-KEY: <BAZARR_API_KEY>" \
   `/media/series`; remoção da `Séries2`; realtime ligado (não efetivo no FUSE).
 - Pós-processamento -1s para Suits/PT-BR (script + config do Bazarr; backups).
 - Radarr + biblioteca Filmes no Jellyfin + Prowlarr/qBittorrent;
-  Radarr 6 indexadores (Comando incluído).
+  Radarr 6 indexadores (Comando incluído; na época).
 - Seerr (sucessor do Jellyseerr) na 5055, com Jellyfin/Sonarr/Radarr.
+- 2026-11-24: **Baixarapido** implementado (`api/baixarapido.go`,
+  `/api/baixarapido`) e adicionado ao Prowlarr/Radarr/Sonarr; proxies do
+  Prowlarr corrigidos para `solvearr:8191`; **1337x**, **YTS** e **UIndex**
+  associados; **Vaca Torrent** descontinuado (`vaqueirofilmes.com`, sem magnets);
+  **XTerFilmes** avaliado e descartado por gate de anúncio.
 - Perfis/custom formats: PT-BR Dublado, English Dub, Dual Audio; perfis
   Original/Dublado/Anime Japonês; defaults no Seerr.
 - Torrent-indexer: categorias 2000/5000 no Torznab, atributo `category`,
@@ -920,7 +940,7 @@ curl -s -H "X-API-KEY: <BAZARR_API_KEY>" \
   release(s) analisados)` com o botão **Buscar original**.
 - FlareSolverr: `solvearr` trocado para a imagem oficial 3.5.0, 1024 MB,
   `shm_size: 1gb`, sessões e timeout 180s. **Comando Torrents** voltou e foi
-  adicionado ao Prowlarr/Radarr/Sonarr (6 indexadores cada); a página “listão”
+  adicionado ao Prowlarr/Radarr/Sonarr (6 indexadores cada, na época); a página “listão”
   é ignorada. BluDV continua atrás do gate `promobr/x.gd`.
 - CF `PT-BR Dublado` ampliado para reconhecer `brazilian`/`ptbr`; releases do
   torrent-indexer com `(brazilian, eng)` passaram a pontuar 150. No Radarr,

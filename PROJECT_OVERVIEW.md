@@ -2,7 +2,7 @@
 
 > **Nota de segurança:** IPs, MACs, usuários e caminhos absolutos foram substituídos por placeholders. Os valores reais ficam no `.env`/config local, fora do git. A senha do WOL agora usa `GAMING_PASSWORD` no `.env`; `.gaming_password` é fallback legado. Veja `SECURITY_AUDIT.md`.
 
-Última atualização: 2026-10-26
+Última atualização: 2026-11-24
 
 Documentos relacionados:
 
@@ -37,15 +37,18 @@ Indexers validados:
 
 | Indexer | Estado |
 |---|---|
+| `baixarapido` | Funciona; magnet direto na página de detalhe e busca via `index.php?busca=` |
 | `comando_torrents` | Funciona com FlareSolverr |
 | `torrent-dos-filmes` | Funciona; magnets diretos e fallback `systemads` |
 | `rede_torrent` | Funciona no domínio novo `redestorrents.com` |
 | `starck-filmes` | Funciona em `starckfilmes-v27.com`; resolvedor de `filmedl.com` |
 | `bludv` | Páginas abrem, mas downloads estão atrás de gate de anúncio |
-| `vaca_torrent` | Domínio não serve mais o site antigo; retorna erro explícito |
+| `vaca_torrent` | Descontinuado: redireciona para Vaqueiro Filmes, que não expõe magnets |
 
 Funcionalidades adicionadas recentemente:
 
+- Novo handler `baixarapido` (`api/baixarapido.go`) com busca, magnet direto,
+  deduplicação por infohash e limpeza de nomes de sites nos títulos;
 - Filtro padrão de seeds (`min_seeds`) e checkbox na UI;
 - Campos `season`, `episode`, `release_type`;
 - Agrupamento por temporada e badge `S03E02` na UI;
@@ -57,11 +60,13 @@ Funcionalidades adicionadas recentemente:
 O stack completo de mídia no Pi (Radarr, Seerr, Jellyfin, Bazarr, Homepage,
 gaming-agent, perfis e legendas) está em [MEDIA_STACK.md](MEDIA_STACK.md).
 
-Estado dos indexadores no Pi em 2026-10-26: `rede_torrent`,
+Estado dos indexadores no Pi em 2026-11-24: `baixarapido`, `rede_torrent`,
 `torrent-dos-filmes`, `starck-filmes` e `comando_torrents` funcionam; `bludv`
-retorna 0 (gate `promobr/x.gd`); `vaca_torrent` está morto; `filme_torrent`
-existe apenas como nome em `IndexerNames` (sem handler); `dodo` não existe no
-código. Detalhes em [MEDIA_STACK.md](MEDIA_STACK.md) §4.
+retorna 0 (gate `promobr/x.gd`); `vaca_torrent` foi descontinuado e o domínio
+agora é Vaqueiro Filmes, sem magnets; `filme_torrent` existe apenas como nome
+em `IndexerNames` (sem handler); `dodo` não existe no código. No Prowlarr, o
+Radarr tem 11 indexadores e o Sonarr 9, incluindo 1337x, YTS e UIndex. Detalhes
+em [MEDIA_STACK.md](MEDIA_STACK.md) §4.
 
 ## 3. Arquitetura
 
@@ -318,8 +323,13 @@ com `&` e `%20`.
 
 - `bludv`: downloads usam gate de anúncio (`gate/go` → `promobr.online` →
   `x.gd`). Não há magnet automático; considerado indisponível.
-- `vaca_torrent`: domínio redireciona para `vaqueirofilmes1.com`; sem correção
-  sem um novo domínio.
+- `vaca_torrent`: descontinuado; o domínio agora é `vaqueirofilmes.com` e o
+  site virou streaming, sem magnets. O handler foi mantido por compatibilidade
+  e retorna 0 resultados.
+- `xterfilmes.com.br` (antes `xfilme.org`): tem catálogo, mas o download passa
+  por um redirect de anúncio; não foi adicionado.
+- `baixarapido`: funciona com magnet direto; algumas páginas não informam
+  tamanho, então parte dos resultados fica sem `size`.
 - Cloudflare pode bloquear por IP/rate limit; o FlareSolverr ajuda, mas não é
   garantia.
 - Seeds refletem o swarm real; torrents antigos podem ter 0.
@@ -329,10 +339,11 @@ com `&` e `%20`.
   equivalente em bash.
 - A instância pública do autor pode bloquear Prowlarr/Jackett; prefira
   autohospedar.
-- Stack de mídia no Pi: ver [MEDIA_STACK.md](MEDIA_STACK.md) — BluDV 0,
-  Vaca morto, `filme_torrent` sem handler, 1337x dependente do FlareSolverr,
-  seeders vazios no Torrent dos Filmes. Radarr tem 7 indexadores (6 do Prowlarr
-  + o proxy **PT-BR Alternate Titles**) e o Sonarr tem 6.
+- Stack de mídia no Pi: ver [MEDIA_STACK.md](MEDIA_STACK.md) — Baixarapido
+  funcionando, BluDV 0 (gate), Vaca descontinuado, `filme_torrent` sem handler,
+  1337x/YTS/UIndex associados, seeders vazios no Torrent dos Filmes. Radarr tem
+  11 indexadores (10 do Prowlarr + o proxy **PT-BR Alternate Titles**) e o
+  Sonarr tem 9.
 - Títulos alternativos: o Radarr não usa os `alternateTitles` do TMDB na busca.
   O proxy Torznab no container **media-gateway** lê `MovieTranslations` pt-BR
   do banco do Radarr, busca no Prowlarr e injeta o IMDb; o release PT-BR do Jack
@@ -419,19 +430,22 @@ Também existem binários não rastreados na raiz (`torrent-indexer.exe`,
 
 1. Decidir o destino do `bludv` (manter indisponível, remover da lista ou
    implementar o fluxo do gate).
-2. Decidir o destino do `vaca_torrent`.
+2. Definir se o `vaca_torrent` descontinuado permanece na lista pública ou é
+   removido do código.
 3. Adicionar volumes persistentes para Redis e Meilisearch.
 4. Criar `scripts/check-indexers.sh` para Linux/Raspberry Pi.
-5. Revisar o diff e commitar as correções.
+5. Manter `baixarapido` e os docs atualizados; reavaliar `xterfilmes` se o
+   gate de anúncio for removido.
 6. Para Raspberry Pi, seguir [RASPBERRY_PI.md](RASPBERRY_PI.md).
 7. Opcional: reverse proxy/HTTPS, autenticação, backup do índice e monitoramento.
 8. Implementar a seção **Filmes** no painel de legendas do dashboard (Bazarr
    `/api/movies`, wanted, quota/fila).
 9. Seerr: adicionar o widget no Homepage com a API key e sincronizar a
    biblioteca **Animes** no Jellyfin (Settings → Jellyfin → Sync Libraries).
-10. Sonarr: já está com 6 indexadores (Comando, Torrent dos Filmes, Starck,
-    Rede, TPB, Torrentio); validar TV dublada e avaliar o 1337x/FlareSolverr.
-11. Revisar `api/torznab.go`, `MEDIA_STACK.md` e os docs e commitar.
+10. Sonarr: já está com 9 indexadores (1337x, Baixarapido, Comando, Torrent dos
+    Filmes, Starck, Rede, TPB, Torrentio e UIndex); validar TV dublada.
+11. Manter `api/torznab.go` e `api/baixarapido.go` cobertos por testes quando
+    os sites mudarem de layout.
 12. Atualizar a cópia versionada `deploy/raspberry/docker-compose.yml` se o
     compose vivo divergir.
 13. Proxy de títulos alternativos: implementado no **media-gateway**; o Jack

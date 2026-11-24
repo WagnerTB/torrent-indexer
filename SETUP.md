@@ -21,7 +21,7 @@ bancos, mídia e alguns scripts de agente vivem **fora** do Git (ver
 | Go | 1.24 (para desenvolvimento/build local) |
 | Node.js + npm | 20+ (somente para editar/compilar o `custom.js` do Homepage) |
 | Raspberry Pi | opcional; Pi 4 de 4 GB com SO **64-bit** para o stack completo |
-| FlareSolverr | necessário para indexers protegidos por Cloudflare (`comando_torrents`, `bludv`) |
+| FlareSolverr | necessário para indexers protegidos por Cloudflare (`comando_torrents`, `bludv`); `baixarapido` não precisa |
 
 No Windows, use PowerShell 7 ou superior para os comandos com `curl.exe`.
 

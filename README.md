@@ -22,12 +22,17 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 
 ## Supported sites
 
+- [baixarapido](https://baixarapido.com/) - magnet direto na página de detalhe;
+  busca via `index.php?busca=`.
 - [comando-torrents](https://comando.la/)
 - [bludv](https://bludvfilmes2.xyz/) - **downloads are currently behind an ad gate**; automatic extraction may return no results. See [SITE_STATUS.md](SITE_STATUS.md).
 - [torrent-dos-filmes](https://torrentdosfilmes.se/)
 - [starck-filmes](https://starckfilmes-v27.com/)
 - [rede-torrent](https://redestorrents.com/)
-- [vaca-torrent](https://vacatorrentmov.com/) - **currently unavailable**: the domain redirects to an unrelated site. See [SITE_STATUS.md](SITE_STATUS.md).
+- [vaca-torrent](https://vaqueirofilmes.com/) - **descontinuado**: o domínio
+  agora é Vaqueiro Filmes, que virou site de streaming e não expõe magnet links.
+  O endpoint é mantido por compatibilidade e retorna 0 resultados. See
+  [SITE_STATUS.md](SITE_STATUS.md).
 
 ## Deploy
 
@@ -201,12 +206,13 @@ settings:
     default: bludv
     options:
       search: Torrent-Indexer Cache
+      baixarapido: Baixarapido
       bludv: BLUDV
       comando_torrents: Comando Torrents
       torrent-dos-filmes: Torrent dos Filmes
       starck-filmes: Starck Filmes
       rede_torrent: Rede Torrent
-      vaca_torrent: Vaca Torrent
+      vaca_torrent: Vaca Torrent (descontinuado)
 
 search:
   paths:

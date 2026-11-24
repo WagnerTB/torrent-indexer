@@ -132,6 +132,8 @@ func (i *Indexer) callIndexer(r *http.Request) ([]schema.IndexedTorrent, string)
 			i.HandlerVacaTorrentIndexer(w, r)
 		case "torrent-dos-filmes":
 			i.HandlerTorrentDosFilmesIndexer(w, r)
+		case "baixarapido":
+			i.HandlerBaixarapidoIndexer(w, r)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

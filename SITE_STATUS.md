@@ -21,39 +21,44 @@ com travamento do processo.
 | Indexer | Situação | Ação necessária |
 |---|---|---|
 | comando_torrents | Funciona quando o FlareSolverr está disponível | Configurar `FLARESOLVERR_ADDRESS` |
+| baixarapido | Validado: 24 resultados para `matrix`; magnet direto e deduplicação por infohash | Nenhuma; algumas páginas não informam tamanho |
 | torrent-dos-filmes | Validado: 19 resultados | Corrigido: volta a ler magnet direto e mantém fallback `systemads` |
 | starck-filmes | Validado: 6 resultados | Corrigido: URL padrão v27 + resolvedor do redirect `filmedl.com` |
 | rede_torrent | Validado: 39 resultados | Corrigido: nova URL, `?busca=` e novos seletores |
-| vaca_torrent | Domínio não serve mais o site antigo; redireciona para `vaqueirofilmes1.com` | Mantido por compatibilidade, mas retorna erro explícito; sem correção sem novo domínio |
+| vaca_torrent | Descontinuado: `vaqueirofilmes.com` virou streaming e não expõe magnet links | Mantido por compatibilidade; retorna 0 resultados |
 | busca agregada (`/search`, `/ui/`) | Validado: 152 documentos, 10 resultados para “The Last of Us” | Meilisearch habilitado no compose; use `/ui/` ou `/search?q=...` |
 | seeds / trackers | Validado com Ubuntu (34 seeds) e House of the Dragon S03 (12–99 seeds) | Corrigido timeout, cache de zero e escolha do tracker |
 | temporadas / episódios | Implementado e validado com House of the Dragon S03 | Parser best-effort, filtros `season`/`episode` e agrupamento na UI |
 | bludv | Páginas abrem via FlareSolverr, mas downloads usam gate de anúncio (`gate/go` → `promobr.online` → afiliado) | Sem correção simples; considerar indisponível até novo método |
 
-### Estado no Pi em 2026-10-26
+### Estado no Pi em 2026-11-24
 
-Teste com `q=minions` (filme Minions 2015/2022), direto nos endpoints do
-torrent-indexer:
+Teste com `q=matrix` direto nos endpoints do torrent-indexer e conferência no
+Prowlarr/Radarr/Sonarr:
 
-| Indexer | Resultado Minions | Prowlarr | Radarr | Sonarr |
+| Indexer | Resultado `matrix` | Prowlarr | Radarr | Sonarr |
 |---|---|---|---|---|
-| `rede_torrent` | 34 resultados, todos com magnet (1080p Dual, 7 seeds) | Sim | Sim | Sim |
-| `torrent-dos-filmes` | 18 resultados, todos com magnet (1080p Dual, 6–7 seeds) | Sim (`/api/torrent-dos-filmes`) | Sim | Sim |
-| `starck-filmes` | 5 resultados, todos com magnet (1080p Dual, 6–7 seeds) | Sim (`/api/starck-filmes`) | Sim | Sim (só filmes) |
+| `rede_torrent` | 39 resultados, magnet direto | Sim | Sim | Sim |
+| `torrent-dos-filmes` | 19 resultados, magnet direto | Sim (`/api/torrent-dos-filmes`) | Sim | Sim |
+| `starck-filmes` | 3 resultados, magnet direto | Sim (`/api/starck-filmes`) | Sim | Sim (só filmes) |
+| `baixarapido` | **24 resultados** (deduplicados), magnet direto | Sim (`/api/baixarapido`) | Sim | Sim |
 | `bludv` | **0 resultados** (gate `promobr/x.gd`) | Não | Não | Não |
-| `comando_torrents` | Funciona com FlareSolverr oficial; 42 itens em `q=a` | Sim (`/api/comando_torrents`) | Sim | Sim |
-| `vaca_torrent` | Domínio morto | Não | Não | Não |
+| `comando_torrents` | 14–20 resultados com FlareSolverr oficial | Sim (`/api/comando_torrents`) | Sim | Sim |
+| `vaca_torrent` | Descontinuado (Vaqueiro Filmes, sem magnets) | Não | Não | Não |
 | `filme_torrent` | 0; só nome em `IndexerNames`, sem handler | Não | Não | Não |
-| `1337x` | Nativo; FlareSolverr falha | Sim | **Não** | Não (perdeu na sync) |
+| `1337x` | Nativo; funciona com proxy `solvearr` (~110s na 1ª busca) | Sim | Sim | Sim |
+| `UIndex` | Nativo; Cloudflare resolvido pelo proxy `solvearr` | Sim | Sim | Sim |
+| `YTS` | Nativo; API `yts.gg` | Sim | Sim | Não (filmes) |
 | `The Pirate Bay` | Nativo | Sim | Sim | Sim |
 | `Torrentio` | Nativo | Sim | Sim | Sim |
 
-O Radarr ficou com **7 indexadores** (Comando, Rede, Torrent dos Filmes, Starck,
-TPB, Torrentio e o proxy **PT-BR Alternate Titles**) e o Sonarr com **6**
-(Comando, Rede, Torrent dos Filmes, Starck, TPB, Torrentio), todos com
+O Radarr ficou com **11 indexadores** (1337x, Baixarapido, Comando, Rede,
+Torrent dos Filmes, Starck, TPB, Torrentio, UIndex, YTS e o proxy
+**PT-BR Alternate Titles**) e o Sonarr com **9** (1337x, Baixarapido, Comando,
+Rede, Torrent dos Filmes, Starck, TPB, Torrentio e UIndex), todos com
 `minimumSeeders = 1`, exceto o proxy (0). O app sync do Prowlarr usa query
-vazia; o fallback do Torznab foi alterado de `q=2024` para `q=a`. O 1337x
-continua dependente do FlareSolverr e fora dos apps.
+vazia; o fallback do Torznab é `q=a`. Os proxies do Prowlarr foram corrigidos
+para `http://solvearr:8191/` com timeout 180s.
 
 ### Teste Minions e perfis de áudio
 
@@ -124,16 +129,39 @@ informa.
 - Validação após a correção: HTTP 200 em 5,5s, **39 resultados** para
   `q=matrix`. O comando encerrou sozinho e o servidor foi parado no `finally`.
 
+### baixarapido
+- URL: `https://baixarapido.com/`.
+- Busca: `index.php?busca=<query>` (formulário GET com campo `busca`).
+- Listagem: `div[itemprop="itemListElement"]` com `a[itemprop="url"]` para a
+  página de detalhe.
+- Detalhe: magnet em `a[href^="magnet:"]`; tabela com `Lançamento`, `Idioma`,
+  `Tamanho`, `Qualidade`, `Nota IMDb`.
+- Implementado em `api/baixarapido.go`, rota `/indexers/baixarapido` e Torznab
+  `/api/baixarapido`.
+- Validação 2026-11-24: **24 resultados** para `q=matrix`, deduplicados por
+  infohash; títulos com nomes de sites (`VACATORRENT.COM`, `COMOEUBAIXO.COM`)
+  limpos; Prowlarr/Radarr/Sonarr OK.
+- Limitação: algumas páginas não informam `Tamanho`; nesses casos o campo fica
+  vazio (o magnet continua válido).
+
+### xterfilmes (xfilme.org)
+- `xfilme.org` redireciona para `https://www.xterfilmes.com.br/`.
+- Tem busca (`/?s=`) e catálogo de filmes/séries, mas o botão de download usa
+  um redirect `?go=...` para `metilinksemvoce.site` (gate de anúncio).
+- Não foi adicionado ao Prowlarr; exigiria contornar o gate, o que não é
+  confiável nem desejável.
+
 ### vaca_torrent
-- `https://vacatorrentmov.com/` retorna HTTP 200, mas o conteúdo agora é um
-  interstitial para `https://vaqueirofilmes1.com/` com anti-bot JS.
-- O HTML não tem mais `.i-tem_ht` nem o endpoint AJAX esperado.
-- Conclusão: o site antigo morreu. Sem um novo domínio oficial não há o que
-  corrigir no scraper.
-- O handler agora detecta o redirecionamento e retorna um erro explícito
-  (`vaca_torrent domain no longer serves the expected site...`) em vez de um
-  erro genérico de JSON. A rota foi mantida para não quebrar configurações
-  existentes de Jackett/Prowlarr.
+- `https://vacatorrentmov.com/` redireciona para `https://vaqueirofilmes.com/`
+  (Vaqueiro Filmes), que usa o mesmo tema `VacaTorrent` mas virou site de
+  streaming.
+- A busca GET `?s=` funciona e a listagem ainda usa `.i-tem_ht`, mas as páginas
+  de detalhe **não expõem magnet links**; o `.streaming-container` está vazio e
+  o antigo endpoint AJAX retorna `0`.
+- Conclusão: o Vaca Torrent como indexador de torrents foi descontinuado. O
+  handler foi mantido por compatibilidade, com o domínio padrão atualizado para
+  `https://vaqueirofilmes.com/` e mensagem explícita de descontinuidade; hoje
+  retorna 0 resultados.
 
 ### bludv
 - `https://bludv-v1.xyz/` redireciona para `https://bludvfilmes2.xyz/` e ambos
@@ -397,15 +425,17 @@ para cache e para o fluxo normal do indexer.
 URLs opcionais por indexer:
 
 ```env
+INDEXER_BAIXARAPIDO_URL=https://baixarapido.com/
 INDEXER_COMANDO_URL=https://comando.la/
 INDEXER_BLUDV_URL=https://bludv-v1.xyz/
 INDEXER_TORRENT_DOS_FILMES_URL=https://torrentdosfilmes.se/
 INDEXER_STARCK_FILMES_URL=https://starckfilmes-v27.com/
 INDEXER_REDE_TORRENT_URL=https://redestorrents.com/
-INDEXER_VACA_TORRENT_URL=https://vacatorrentmov.com/
+INDEXER_VACA_TORRENT_URL=https://vaqueirofilmes.com/
 ```
 
-Observação: `vaca_torrent` continua sem funcionar mesmo com a URL configurada.
+Observação: `vaca_torrent` foi descontinuado; o domínio novo é Vaqueiro Filmes
+e não expõe magnet links. O endpoint é mantido por compatibilidade.
 
 ## Como testar sem esperar demais
 
@@ -479,6 +509,10 @@ O script não inicia nem para o servidor, então ele sempre termina sozinho.
 - Temporadas/episódios: House of the Dragon S03 retornou `season=3` com
   `episode=1,2,3,5,8`; filtro `season=3` no `/search` retornou os episódios
   corretos com seeds.
+- 2026-11-24 (Pi): `baixarapido` implementado e validado com 24 resultados
+  para `matrix`; Comando 14–20 resultados; Vaca 0 (descontinuado); Prowlarr com
+  10 indexadores; Radarr 11 e Sonarr 9; 1337x, YTS e UIndex associados; proxies
+  do FlareSolverr em `solvearr:8191`.
 - 2026-10-26 (Pi): `torrent-dos-filmes` 18, `starck-filmes` 5 e `rede_torrent`
   34 resultados para Minions; BluDV 0 (gate); Comando funciona com FlareSolverr
   oficial; Vaca morto; Radarr 7 (com o proxy PT-BR Alternate Titles) e Sonarr 6;
@@ -491,18 +525,21 @@ O script não inicia nem para o servidor, então ele sempre termina sozinho.
    remove da lista pública.
 2. **Comando Torrents**: funcionando; a primeira busca em um domínio novo pode
    levar ~80-120s por causa do Cloudflare; acompanhar se o site muda de domínio.
-3. **Vaca Torrent**: domínio morto; remover ou aguardar novo domínio.
+3. **Vaca Torrent**: descontinuado (Vaqueiro Filmes, sem magnets); decidir se
+   remove o endpoint/lista pública ou mantém por compatibilidade.
 4. **Filme Torrent**: só nome em `IndexerNames`, sem handler/rota; implementar
    ou remover. **Dodo Filmes** não existe no código atual.
-5. **1337x**: não sincroniza no Radarr por FlareSolverr; no Sonarr também
-   falhou na última sync. O Rede voltou com o fallback `q=a`.
-6. **Sonarr/Torrent dos Filmes (TV)**: o indexador já está no Sonarr (6
+5. **1337x**: recuperado com os proxies do Prowlarr em `solvearr:8191`; está no
+   Radarr e Sonarr. A primeira busca pode levar ~110s.
+6. **Sonarr/Torrent dos Filmes (TV)**: o indexador está no Sonarr (9
    indexadores); validar se retorna TV dublada.
 7. **Seeds**: `minimumSeeders=1` no App Profile Standard e nos *arr; o Torrent
    dos Filmes não informa seeders no Radarr (vazio); preferir Torrentio/TPB na
    escolha manual.
-8. **Torznab**: `api/torznab.go` alterado (categorias 2000/5000 + fallback
-   `q=a`); revisar e commitar com os docs.
+8. **Baixarapido**: acompanhar mudanças de layout/busca; parte dos resultados
+   fica sem tamanho porque a página não informa.
+9. **Torznab**: `api/torznab.go` e `api/baixarapido.go` revisados; docs e código
+   commitados em 2026-11-24.
 9. **Stack de mídia**: dashboard Filmes, widget do Seerr, sync da biblioteca
    Animes no Jellyfin, `-1s` só no Suits e fila de legendas no navegador; ver
    [MEDIA_STACK.md](MEDIA_STACK.md) §15.

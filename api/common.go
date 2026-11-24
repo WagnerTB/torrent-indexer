@@ -185,7 +185,7 @@ func isNonLanguageToken(s string) bool {
 // findYearFromText extracts the year from a given text.
 // It looks for patterns like "Lançamento: 2001" in the title.
 func findYearFromText(text string, title string) (year string) {
-	re := regexp.MustCompile(`(?:Lançamento|Year): (.*)`)
+	re := regexp.MustCompile(`(?:Lançamento|Year):\s*(.*)`)
 	yearMatch := re.FindStringSubmatch(text)
 	if len(yearMatch) > 0 {
 		lancamentoText := strings.TrimSpace(yearMatch[1])
