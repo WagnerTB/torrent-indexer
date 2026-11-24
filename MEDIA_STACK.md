@@ -2,7 +2,7 @@
 
 > **Nota de segurança:** IPs, MACs, usuários e caminhos absolutos foram substituídos por placeholders. Os valores reais ficam no `.env`/config local, fora do git. A senha do WOL agora usa `GAMING_PASSWORD` no `.env`; `.gaming_password` é fallback legado. Veja `SECURITY_AUDIT.md`.
 
-Última atualização: 2026-11-02
+Última atualização: 2026-11-24
 
 Documentos relacionados:
 
@@ -19,11 +19,11 @@ legendas, os perfis e as decisões operacionais.
 > **Segredos:** não copie API keys, senhas ou tokens para este documento.
 > Eles ficam nos arquivos indicados em cada serviço e não devem ir para o Git.
 > As chaves usadas pelo Homepage ficam em
-> `<MEDIA_ROOT>/docker/homepage/{services.yaml,custom.js}`; as dos *arr ficam
-> em `<MEDIA_ROOT>/docker/<serviço>/config.xml`; a do Prowlarr em
-> `<MEDIA_ROOT>/docker/prowlarr/config.xml`; a do Bazarr em
-> `<MEDIA_ROOT>/docker/bazarr/config/config.yaml`; a do Seerr em
-> `<MEDIA_ROOT>/docker/seerr/settings.json`.
+> `<CONFIG_ROOT>/homepage/{services.yaml,custom.js}`; as dos *arr ficam
+> em `<CONFIG_ROOT>/<serviço>/config.xml`; a do Prowlarr em
+> `<CONFIG_ROOT>/prowlarr/config.xml`; a do Bazarr em
+> `<CONFIG_ROOT>/bazarr/config/config.yaml`; a do Seerr em
+> `<CONFIG_ROOT>/seerr/settings.json`.
 
 ## 1. Serviços e portas
 
@@ -36,18 +36,18 @@ Compose: `<STACK_ROOT>/docker-compose.yml` (projeto Compose
 | `redis` | `redis:alpine` | interna | volume `redis-data` |
 | `meilisearch` | `getmeili/meilisearch` | interna | volume `meili-data` |
 | `solvearr` | `ghcr.io/flaresolverr/flaresolverr` | interna (`8191`) | FlareSolverr 3.5.0 usado pelo indexer; 1024 MB + `shm_size: 1gb` |
-| `qbittorrent` | `lscr.io/linuxserver/qbittorrent` | `<LAN_IP>:8082` (WebUI), `6881` TCP/UDP | `<MEDIA_ROOT>/docker/qbittorrent` |
-| `sonarr` | `lscr.io/linuxserver/sonarr` | `<LAN_IP>:8989` | `<MEDIA_ROOT>/docker/sonarr2` |
-| `prowlarr` | `lscr.io/linuxserver/prowlarr` | `<LAN_IP>:9696` | `<MEDIA_ROOT>/docker/prowlarr` |
-| `bazarr` | `linuxserver/bazarr` | `<LAN_IP>:6767` | `<MEDIA_ROOT>/docker/bazarr` |
-| `jellyfin` | `jellyfin/jellyfin` | `8096` (remoto) | `<MEDIA_ROOT>/docker/jellyfin` + `jellyfin-cache` |
+| `qbittorrent` | `lscr.io/linuxserver/qbittorrent` | `<LAN_IP>:8082` (WebUI), `6881` TCP/UDP | `<CONFIG_ROOT>/qbittorrent` |
+| `sonarr` | `lscr.io/linuxserver/sonarr` | `<LAN_IP>:8989` | `<CONFIG_ROOT>/sonarr2` |
+| `prowlarr` | `lscr.io/linuxserver/prowlarr` | `<LAN_IP>:9696` | `<CONFIG_ROOT>/prowlarr` |
+| `bazarr` | `linuxserver/bazarr` | `<LAN_IP>:6767` | `<CONFIG_ROOT>/bazarr` |
+| `jellyfin` | `jellyfin/jellyfin` | `8096` (remoto) | `<CONFIG_ROOT>/jellyfin` + `jellyfin-cache` |
 | `stremio-server` | `stremio/server` | `11470`, `12470` (remoto) | `<MEDIA_ROOT>/stremio-server` |
-| `homepage` | `ghcr.io/gethomepage/homepage` | `3000` (remoto, modo adaptativo) | `<MEDIA_ROOT>/docker/homepage` |
-| `gaming-agent` | `python:3.12-alpine` (script local) | `<LAN_IP>:8099` (privado, LAN) e `8098` (público: status/WOL com senha) | `<MEDIA_ROOT>/docker/gaming-agent` |
-| `media-agent` | `python:3.12-alpine` (script local) | `8097` (LAN + Tailscale, allowlist de IP) | `<MEDIA_ROOT>/docker/media-agent` |
-| `media-gateway` | `python:3.12-alpine` (script local) | interna (`8099`, rede `media`) | `<MEDIA_ROOT>/docker/media-gateway` |
-| `radarr` | `lscr.io/linuxserver/radarr` | `<LAN_IP>:7878` | `<MEDIA_ROOT>/docker/radarr` |
-| `seerr` | `seerr/seerr` (sucessor do Jellyseerr) | `5055` (remoto) | `<MEDIA_ROOT>/docker/seerr` |
+| `homepage` | `ghcr.io/gethomepage/homepage` | `3000` (remoto, modo adaptativo) | `<CONFIG_ROOT>/homepage` |
+| `gaming-agent` | `python:3.12-alpine` (script local) | `<LAN_IP>:8099` (privado, LAN) e `8098` (público: status/WOL com senha) | `<CONFIG_ROOT>/gaming-agent` |
+| `media-agent` | `python:3.12-alpine` (script local) | `8097` (LAN + Tailscale, allowlist de IP) | `<CONFIG_ROOT>/media-agent` |
+| `media-gateway` | `python:3.12-alpine` (script local) | interna (`8099`, rede `media`) | `<CONFIG_ROOT>/media-gateway` |
+| `radarr` | `lscr.io/linuxserver/radarr` | `<LAN_IP>:7878` | `<CONFIG_ROOT>/radarr` |
+| `seerr` | `seerr/seerr` (sucessor do Jellyseerr) | `5055` (remoto) | `<CONFIG_ROOT>/seerr` |
 | `autoheal` | `willfarrell/autoheal` | interna | reinicia containers marcados com `autoheal=true` quando ficam unhealthy |
 
 Acesso: **8096 (Jellyfin), 5055 (Seerr), 8080 (indexer/UI), 3000 (Homepage),
@@ -71,16 +71,28 @@ containers unhealthy; o watchdog cobre travamento total do sistema. Instalação
 
 ## 2. Armazenamento e caminhos
 
-- Mídia: `<MEDIA_ROOT>` montado como `/media` nos containers.
-- Downloads do qBittorrent: `<MEDIA_ROOT>/downloads`.
+Desde a migração de 2026-11-23 o stack usa três filesystems (detalhes em
+[STORAGE_MIGRATION_2026-11-23.md](STORAGE_MIGRATION_2026-11-23.md)):
+
+- Configs: `<CONFIG_ROOT>` (no Pi, `/srv/PiMedia/docker`).
+- Mídia (2 TB): `<MEDIA_ROOT>` montado como `/media` nos containers.
+- Downloads (640 GB): `<DOWNLOAD_ROOT>` montado como `/media/downloads` em
+  qBittorrent, Sonarr, Radarr, Bazarr, Jellyfin e media-agent (o mesmo caminho
+  dentro de todos os containers).
 - Biblioteca de séries: `<MEDIA_ROOT>/Suits` (a série Suits) e
   `<MEDIA_ROOT>/series` (séries novas adicionadas pelo Sonarr).
 - Animes: `<MEDIA_ROOT>/animes`.
 - Filmes: `<MEDIA_ROOT>/movies`.
-- Configs: `<MEDIA_ROOT>/docker/<serviço>`.
 - Docker/containerd: `<DOCKER_DATA_ROOT>` (o SSD; ver `RASPBERRY_PI.md`).
-- Hardlinks: os MKVs de Suits existem em `/media/downloads/...` e em
-  `/media/Suits/Season 1`; são o mesmo inode. Legendas **não** são hardlinks.
+- qBittorrent: save path `/media/downloads` e temporários em
+  `/media/downloads/incomplete` (mesmo disco). O temp antigo ficava em
+  `/media/temp`, no disco de mídia.
+- Fila do qBittorrent: 5 downloads ativos e 10 torrents ativos; torrents
+  lentos (< 100 KiB/s) não contam no limite, para que um torrent morto não
+  bloqueie os demais.
+- Hardlinks: como downloads e biblioteca estão em filesystems diferentes, as
+  importações do *arr são **cópias**, não hardlinks. Legendas também não são
+  hardlinks.
 
 ## 3. Alinhamento Sonarr/Radarr/Bazarr/Jellyfin
 
@@ -98,15 +110,12 @@ do Sonarr, mas o Jellyfin lia `/media/Suits`. Hoje:
   - **Filmes**: `/media/movies`
   - **Animes**: `/media/animes`
 - As bibliotecas Filmes/Animes/Séries estão com **monitoramento em tempo real**
-  (`EnableRealtimeMonitor: true`), mas o monitor não funciona de forma confiável
-  no `<MEDIA_ROOT>`: o volume é FUSE/`fuseblk` (NTFS-3G) e os eventos de
-  criação/movimentação não chegam ao Jellyfin. Na prática, o Jellyfin depende do
-  scan agendado. Em 2026-10-26 o intervalo de “Escanear a Biblioteca de Mídia”
-  foi reduzido de 12h para **30 min**.
+  (`EnableRealtimeMonitor: true`). Até a migração de 2026-11-23 a biblioteca
+  ficava em NTFS-3G (FUSE) e os eventos de criação/movimentação não chegavam ao
+  Jellyfin; agora `<MEDIA_ROOT>` é ext4, então o realtime volta a ser viável. O
+  scan agendado de **30 min** continua ativo como fallback.
 - Se um filme/episódio recém-importado não aparecer, forçar o scan
-  (Dashboard → Scheduled Tasks ou `POST /Library/Refresh`). O scan também
-  reinicia o watcher das pastas, mas o watcher continua sem receber eventos no
-  FUSE.
+  (Dashboard → Scheduled Tasks ou `POST /Library/Refresh`).
 - Após baixar uma legenda nova o Jellyfin ainda pode precisar de um
   refresh/scan do item; o `-1s` do Suits é aplicado no arquivo pelo Bazarr, não
   no Jellyfin.
@@ -117,7 +126,7 @@ do Sonarr, mas o Jellyfin lia `/media/Suits`. Hoje:
   `downloads`, `docker`, `filmes`, etc. e criava “séries” falsas.
 - Foi corrigida para `/media/Suits` + `/media/series` via `options.xml` e
   `.mblink` (`Suits.mblink` e `series.mblink`), com backup em
-  `<MEDIA_ROOT>/docker/jellyfin/root/default/Séries/`.
+  `<CONFIG_ROOT>/jellyfin/root/default/Séries/`.
 - Uma biblioteca vazia `Séries2` criada durante a tentativa via API foi
   removida manualmente (backup em `/tmp/jf_series2_bak_*`).
 - Há itens antigos órfãos de `/media/downloads` e `/media/docker` no banco do
@@ -134,7 +143,7 @@ Jellyfin assim que o *arr importa/renomeia um arquivo:
 - Conexão **Custom Script** chamada **Jellyfin Refresh** (id 1) no Radarr e no
   Sonarr, com **On Import**, **On Upgrade** e **On Rename**.
 - Script: `/config/scripts/jellyfin-refresh.sh` dentro dos containers,
-  gravado em `<MEDIA_ROOT>/docker/{radarr,sonarr2}/scripts/`.
+  gravado em `<CONFIG_ROOT>/{radarr,sonarr2}/scripts/`.
 - A chave fica em `.jellyfin_key` no mesmo diretório (API key do Jellyfin
   `MediaImportHook`, criada em 2026-10-26; o valor não vai para os docs).
 - O script chama `POST /Library/Media/Updated` com o caminho do arquivo; se
@@ -424,7 +433,7 @@ Torrent com **score 100** e `accepted: true` no Radarr; a verificação
 - URL: `http://<LAN_IP>:5055`.
 - Imagem: `seerr/seerr` (o Jellyseerr foi descontinuado em 2026-02-14 e o login
   Jellyfin antigo falha; o Seerr é o sucessor oficial).
-- Config: `<MEDIA_ROOT>/docker/seerr/settings.json` e `db/`.
+- Config: `<CONFIG_ROOT>/seerr/settings.json` e `db/`.
 - Servidores: Jellyfin `http://jellyfin:8096`; Sonarr `http://sonarr:8989`
   (root normal `/media/series`, anime `/media/animes`); Radarr
   `http://radarr:7878` (root `/media/movies`).
@@ -442,7 +451,7 @@ Torrent com **score 100** e `accepted: true` no Radarr; a verificação
 ## 8. Legendas (Bazarr) e o ajuste de -1s
 
 Bazarr em `http://<LAN_IP>:6767`, config
-`<MEDIA_ROOT>/docker/bazarr/config/config.yaml`.
+`<CONFIG_ROOT>/bazarr/config/config.yaml`.
 
 - Perfis: **PTBR** (`pb`, default para séries e filmes) e EN.
 - Provedores habilitados: `opensubtitlescom` e `subf2m`.
@@ -457,7 +466,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
   detectado.
 - CORS habilitado (`cors.enabled: true`) para o dashboard poder chamar a API.
 - **Ajuste fino -1s (somente Suits/PT-BR):**
-  - Script: `<MEDIA_ROOT>/docker/bazarr/scripts/shift_subs.py`.
+  - Script: `<CONFIG_ROOT>/bazarr/scripts/shift_subs.py`.
   - Pós-processamento no Bazarr:
     ```
     use_postprocessing: true
@@ -495,7 +504,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
 
 - URL LAN: `http://<LAN_IP>:3000`.
 - URL Tailscale: `http://<TAILSCALE_IP>:3000`.
-- Config viva: `<MEDIA_ROOT>/docker/homepage/{settings,services,widgets,bookmarks}.yaml`,
+- Config viva: `<CONFIG_ROOT>/homepage/{settings,services,widgets,bookmarks}.yaml`,
   `custom.js` e `custom.css`.
 - **Fonte do painel:** `deploy/homepage/src` (módulos ES) e
   `deploy/homepage/custom.css` (tema global). O `custom.js` do Pi é artefato de
@@ -583,7 +592,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
 
 - Container `gaming-agent` (host network), só WOL/status: `8099` privado
   (**LAN only**, `LISTEN_HOST=<LAN_IP>`) e `8098` público (LAN + Tailscale).
-- Script: `<MEDIA_ROOT>/docker/gaming-agent/agent.py` (fora do Git); monta
+- Script: `<CONFIG_ROOT>/gaming-agent/agent.py` (fora do Git); monta
   apenas o diretório `/app`. Não acessa Bazarr, Radarr, Sonarr ou Seerr.
 - Endpoints:
   - `GET /status`: ping em `PC_IP` (Tailscale `<PC_TAILSCALE_IP>` e LAN
@@ -611,11 +620,11 @@ Bazarr em `http://<LAN_IP>:6767`, config
   (`LISTEN_HOST=0.0.0.0`). O `ALLOWED_NETWORKS` aceita LAN
   (`<LAN_SUBNET>`), Tailscale (`<TAILSCALE_RANGE>` e `<TAILSCALE_IPV6_RANGE>`) e
   loopback; fora disso retorna 403.
-- Script: `<MEDIA_ROOT>/docker/media-agent/media_agent.py`; a cópia versionada
+- Script: `<CONFIG_ROOT>/media-agent/media_agent.py`; a cópia versionada
   fica em `deploy/raspberry/media-agent/media_agent.py` e é copiada para
   `${CONFIG_ROOT}/media-agent` no deploy. Ele monta o
   `config.yaml` do Bazarr, os `config.xml` de Radarr/Sonarr, o config do Seerr
-  (`/seerr/settings.json`) e a chave `<MEDIA_ROOT>/docker/media-agent/.bazarr_key`
+  (`/seerr/settings.json`) e a chave `<CONFIG_ROOT>/media-agent/.bazarr_key`
   (`BAZARR_KEY_FILE`). A `OS_API_KEY` (OpenSubtitles) vem do `.env`
   (`OS_API_KEY`) e não fica no `media_agent.py`. As API keys nunca vão para o
   navegador.
@@ -857,7 +866,7 @@ curl -s -X POST -H "X-Api-Key: <PROWLARR_API_KEY>" \
   -d '{"name":"ApplicationIndexerSync"}' \
   http://<LAN_IP>:9696/api/v1/command
 
-# Jellyfin: forçar scan (token em <MEDIA_ROOT>/docker/jellyfin/data/jellyfin.db)
+# Jellyfin: forçar scan (token em <CONFIG_ROOT>/jellyfin/data/jellyfin.db)
 curl -s -X POST -H "X-Emby-Token: <JELLYFIN_TOKEN>" \
   http://<LAN_IP>:8096/Library/Refresh
 

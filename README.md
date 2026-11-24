@@ -93,7 +93,7 @@ You can configure the server using the following environment variables:
 Do not commit real secrets, private IPs or WOL/MAC data.
 
 - **Root `.env`:** copy `.env.example` to `.env` and set `MEILI_MASTER_KEY` (`openssl rand -base64 32`). The same key is used by the indexer and Meilisearch.
-- **Raspberry Pi stack:** copy `deploy/raspberry/.env.example` to `.env` on the host and fill `MEILI_MASTER_KEY`, `LAN_IP`, `TAILSCALE_IP`, `ALLOWED_NETWORKS`, `PC_IP`, `PC_MAC`, `LAN_BROADCAST`, `MEDIA_ROOT` and `CONFIG_ROOT`.
+- **Raspberry Pi stack:** copy `deploy/raspberry/.env.example` to `.env` on the host and fill `MEILI_MASTER_KEY`, `LAN_IP`, `TAILSCALE_IP`, `ALLOWED_NETWORKS`, `PC_IP`, `PC_MAC`, `LAN_BROADCAST`, `MEDIA_ROOT`, `DOWNLOAD_ROOT` and `CONFIG_ROOT`.
 - **WOL:** the password comes from `GAMING_PASSWORD` in `.env` (outside Git). `PC_IP`/`PC_MAC`/`LAN_BROADCAST` also come from `.env`; the agent still supports `.gaming_password` as a legacy fallback.
 - `.env`, `.env.*` (except `.env.example`), `.gaming_password`, `.bazarr_key`, `requests.db`, `state/` and `*.local.md` are ignored by Git.
 - The runbooks (`PROJECT_OVERVIEW.md`, `SITE_STATUS.md`, `RASPBERRY_PI.md`, `MEDIA_STACK.md`) use placeholders such as `<LAN_IP>` and `<TAILSCALE_IP>`. The files with real values are kept locally as `*.local.md` and are ignored.

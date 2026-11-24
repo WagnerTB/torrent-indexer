@@ -20,6 +20,8 @@ state/
 /torrent-indexer-linux-arm64
 /torrent-indexer-linux-arm64-new
 /dist/
+__pycache__/
+*.pyc
 
 # Homepage custom.js build
 deploy/homepage/node_modules/

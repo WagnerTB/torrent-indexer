@@ -2270,6 +2270,66 @@ def arr_audio_check(kind=None, item_id=None, all_items=False):
 
 
 
+
+def _import_fmt(n):
+    n = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024:
+            return ("%.0f %s" % (n, unit)) if unit == "B" else ("%.1f %s" % (n, unit))
+        n /= 1024
+    return "%.1f PB" % n
+
+
+def active_imports():
+    """Detect files currently being copied into the media library (growing files)."""
+    dirs = ["/media/movies", "/media/series", "/media/animes", "/media/Suits"]
+    now = time.time()
+    found = []
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        for root, _dirs, files in os.walk(d):
+            for name in files:
+                fp = os.path.join(root, name)
+                try:
+                    st = os.stat(fp)
+                except OSError:
+                    continue
+                if now - st.st_mtime > 180:
+                    continue
+                s1 = st.st_size
+                time.sleep(0.4)
+                try:
+                    s2 = os.stat(fp).st_size
+                except OSError:
+                    continue
+                if s2 <= s1:
+                    continue
+                found.append({
+                    "name": name,
+                    "library": os.path.basename(d),
+                    "size": s2,
+                    "sizeLabel": _import_fmt(s2),
+                    "rateBps": int((s2 - s1) / 0.4),
+                    "rateLabel": _import_fmt((s2 - s1) / 0.4) + "/s",
+                })
+    found.sort(key=lambda x: -x["size"])
+    return {"ok": True, "active": found}
+
+
+def migration_status():
+    """Return the running data-migration progress (if any)."""
+    for path in ("/media/.migration-status.json", "/migration/status.json"):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                data["path"] = path
+                return data
+        except (OSError, ValueError):
+            continue
+    return {"phase": "idle", "percent": None}
+
 class Handler(BaseHTTPRequestHandler):
     def _allowed(self):
         try:
@@ -2357,6 +2417,10 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
             self._json(200, sonarr_episodes((params.get("seriesId") or [""])[0]))
+        elif self.path.startswith("/imports/active"):
+            self._json(200, active_imports())
+        elif self.path.startswith("/migration/status"):
+            self._json(200, migration_status())
         elif self.path.startswith("/bazarr"):
             self._bazarr()
         else:

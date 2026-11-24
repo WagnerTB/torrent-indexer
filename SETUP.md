@@ -276,9 +276,9 @@ npm run check
 O artefato é `dist/custom.js`. Para publicar:
 
 ```bash
-ssh <pi> 'cp -p <MEDIA_ROOT>/docker/homepage/custom.js \
-  <MEDIA_ROOT>/docker/homepage/custom.js.bak.$(date +%Y%m%d-%H%M%S)'
-scp dist/custom.js <pi>:<MEDIA_ROOT>/docker/homepage/custom.js
+ssh <pi> 'cp -p <CONFIG_ROOT>/homepage/custom.js \
+  <CONFIG_ROOT>/homepage/custom.js.bak.$(date +%Y%m%d-%H%M%S)'
+scp dist/custom.js <pi>:<CONFIG_ROOT>/homepage/custom.js
 ```
 
 Faça hard refresh no navegador. **Não edite o `custom.js` do Pi à mão.**

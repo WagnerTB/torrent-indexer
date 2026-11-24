@@ -257,7 +257,7 @@ Teste realizado com `FLARESOLVERR_ADDRESS=http://<LAN_IP>.1:8191`
   8099 privado continua LAN-only.
 - A chave do Bazarr saiu do `custom.js`; a aba Legendas usa o proxy
   `/bazarr` do media-agent e a chave fica em
-  `<MEDIA_ROOT>/docker/media-agent/.bazarr_key`.
+  `<CONFIG_ROOT>/media-agent/.bazarr_key`.
 - O media-agent (`8097`) não tem autenticação, mas só aceita LAN
   (`<LAN_SUBNET>`) e Tailscale (`<TAILSCALE_RANGE>`); ele pode adicionar séries,
   monitorar episódios e alterar perfis no Sonarr.

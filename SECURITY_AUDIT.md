@@ -63,7 +63,7 @@
 - O `gaming-agent` no Pi agora lê `PC_IP`/`PC_MAC`/`LAN_BROADCAST`/`GAMING_PASSWORD` do ambiente e não tem mais IP/MAC como defaults no código.
 - O `wake()` ganhou guarda para `PC_MAC` vazio; o endpoint público continua exigindo a senha. O status público não expõe IP/MAC.
 - Teste real: status **200** e wake com a senha do `.env` **200**; o arquivo legado foi removido e o wake foi repetido com sucesso usando só o `.env`.
-- O `gaming-agent` no Pi roda a partir de `<MEDIA_ROOT>/docker/gaming-agent/agent.py` (NTFS); o arquivo ficou 775, mas **não contém mais segredos**. A senha está no `.env` 600.
+- O `gaming-agent` no Pi roda a partir de `<CONFIG_ROOT>/gaming-agent/agent.py` (NTFS); o arquivo ficou 775, mas **não contém mais segredos**. A senha está no `.env` 600.
 
 ## 3. Histórico do Git
 
@@ -98,7 +98,7 @@
 
 1. **Backups do stack vivo:** os arquivos `*.bak.*` acima têm valores antigos (chave/IP/MAC) e estão com 600 no Pi. Apague quando não precisar de rollback; eles não estão no Git.
 2. **Chaves antigas compartilhadas:** o literal de 19 caracteres foi aposentado; a chave viva é de 64 caracteres e não está no repositório. Se os templates antigos (18/30 caracteres) foram enviados a alguém, rotacione esses usos específicos — eles não são a chave viva.
-3. **Config root no NTFS:** `.bazarr_key`, `config.xml` de Radarr/Sonarr e outros segredos vivos continuam sob `<MEDIA_ROOT>/docker` (NTFS), fora do Git. Se a mídia for exposta por Samba/NFS, considere mover o config root para o ext4 (`<DOCKER_DATA_ROOT>`) com 600.
+3. **Config root no NTFS:** `.bazarr_key`, `config.xml` de Radarr/Sonarr e outros segredos vivos continuam sob `<CONFIG_ROOT>` (NTFS), fora do Git. Se a mídia for exposta por Samba/NFS, considere mover o config root para o ext4 (`<DOCKER_DATA_ROOT>`) com 600.
 4. **E-mail de maintainer:** é contato público upstream; mantido. Remova se não quiser expor.
 5. **Root `.env` local:** o repositório tem `.env.example`; o `.env` real é local e ignorado. O stack vivo já tem o seu.
 6. **Backups `.local.md`:** são locais e ignorados; não commitar.

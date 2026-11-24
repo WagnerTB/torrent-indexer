@@ -2,7 +2,7 @@
 
 > **Nota de segurança:** IPs, MACs, usuários e caminhos absolutos foram substituídos por placeholders. Os valores reais ficam no `.env`/config local, fora do git. A senha do WOL agora usa `GAMING_PASSWORD` no `.env`; `.gaming_password` é fallback legado. Veja `SECURITY_AUDIT.md`.
 
-Última atualização: 2026-10-26
+Última atualização: 2026-11-24
 
 Este documento lista o que precisa mudar para rodar o Torrent Indexer em um
 Raspberry Pi 4 de 4 GB. Para o panorama geral do projeto, veja
@@ -412,24 +412,33 @@ futuras alterações.
 ### 11.1 Hardware e sistema
 
 - Raspberry Pi 4, 4 GB, Raspberry Pi OS 64-bit (Bookworm, kernel 6.12).
-- SD de 15 GB para o sistema (~6,4 GB livres) e SSD USB 3.0 de 240 GB:
-  - `/dev/sda2`: NTFS de 160 GB em `<MEDIA_ROOT>` (mídia e configs);
-  - `/dev/sda4`: ext4 de 63 GB em `<DOCKER_DATA_ROOT>` (Docker/containerd).
+- SD de 15 GB para o sistema (~6,4 GB livres) e três discos USB atrás de um
+  hub USB 3.0 alimentado (Genesys Logic), com mount por UUID no `/etc/fstab`
+  (`noatime,nofail`):
+  - SSD 240 GB (`sda`): `sda2` NTFS 160 GB em `/srv/PiMedia` (configs, sob
+    `<CONFIG_ROOT>`) e `sda4` ext4 63 GB em `<DOCKER_DATA_ROOT>`
+    (Docker/containerd);
+  - 2 TB ext4 label `media` em `<MEDIA_ROOT>` (biblioteca);
+  - 640 GB ext4 label `downloads` em `<DOWNLOAD_ROOT>` (downloads/temp do
+    qBittorrent).
+  Detalhes da migração: `STORAGE_MIGRATION_2026-11-23.md`.
 - zram de 2 GB (`zstd`, prioridade 100) como swap e `vm.swappiness=100`.
 - `cgroup_enable=memory` no `/boot/firmware/cmdline.txt`. O DTB do Pi define
   `cgroup_disable=memory`; sem esse parâmetro o Docker não aplica limites.
 - `data-root` do Docker e `root` do containerd em `<DOCKER_DATA_ROOT>`.
-  Drop-ins do systemd usam
-  `RequiresMountsFor=<MEDIA_ROOT> <DOCKER_DATA_ROOT>`, evitando que o Docker
-  grave no SD quando o SSD não montar.
+  Drop-ins do systemd usam `RequiresMountsFor=/srv/PiMedia
+  <DOCKER_DATA_ROOT>`, evitando que o Docker grave no SD quando o SSD não
+  montar. O `media-stack.service` ainda não exige `<MEDIA_ROOT>` e
+  `<DOWNLOAD_ROOT>`; recomenda-se incluí-los para a stack não subir com um
+  disco novo ausente.
 - A ventoinha está ligada direto no 5 V (sem PWM), somando corrente no mesmo
-  trilho do SSD USB. Inicialmente houve undervoltage transitório no boot,
-  quando todos os containers subiam juntos. Com a subida escalonada
-  (`media-stack.service`, seção 11.6) o boot passou a registrar
-  `throttled=0x0` e nenhum undervoltage, inclusive sob 60 s de carga nos
-  quatro núcleos. Se for trocar ventoinha/fonte: 5 V/3 A+ (ideal 5 V/5 A),
-  cabo curto e ventoinha em 3,3 V ou via transistor no GPIO14 (o overlay
-  `gpio-fan` já está no `config.txt`).
+  trilho dos discos USB. Inicialmente houve undervoltage transitório no boot e
+  quedas do SSD por over-current ao adicionar um HDD; a solução foi o hub USB
+  3.0 alimentado. Com a subida escalonada (`media-stack.service`, seção 11.6) o
+  boot passou a registrar `throttled=0x0` e nenhum undervoltage, inclusive sob
+  60 s de carga nos quatro núcleos. Se for trocar ventoinha/fonte: 5 V/3 A+
+  (ideal 5 V/5 A), cabo curto e ventoinha em 3,3 V ou via transistor no GPIO14
+  (o overlay `gpio-fan` já está no `config.txt`).
 
 ### 11.2 Compose único
 
@@ -473,14 +482,19 @@ O `homepage` usa `HOMEPAGE_ALLOWED_HOSTS: "*"` (LAN-only).
 
 - Volumes nomeados: `redis-data` (`appendonly yes`) e `meili-data`.
 - Configs no SSD:
-  `<MEDIA_ROOT>/docker/{qbittorrent,sonarr2,prowlarr,bazarr,jellyfin,jellyfin-cache,radarr,homepage,gaming-agent,media-agent,seerr}`.
-- Mídia: `<MEDIA_ROOT>` montado como `/media` nos containers; downloads em
-  `<MEDIA_ROOT>/downloads`.
+  `<CONFIG_ROOT>/{qbittorrent,sonarr2,prowlarr,bazarr,jellyfin,jellyfin-cache,radarr,homepage,gaming-agent,media-agent,seerr}`.
+- Mídia (2 TB): `<MEDIA_ROOT>` montado como `/media` nos containers.
+- Downloads (640 GB): `<DOWNLOAD_ROOT>` montado como `/media/downloads` em
+  qbittorrent, sonarr, radarr, bazarr, jellyfin e media-agent (`:ro`).
 - Bibliotecas: `<MEDIA_ROOT>/Suits`, `<MEDIA_ROOT>/series`,
   `<MEDIA_ROOT>/animes` e `<MEDIA_ROOT>/movies`.
 - Stremio: `<MEDIA_ROOT>/stremio-server`.
+- Status da migração: `<MEDIA_ROOT>/.migration-status.json` montado em
+  `/migration/status.json:ro` no media-agent.
 - Legendas/pós-processamento do Bazarr:
-  `<MEDIA_ROOT>/docker/bazarr/scripts/shift_subs.py`.
+  `<CONFIG_ROOT>/bazarr/scripts/shift_subs.py`.
+- Sem hardlinks entre downloads e biblioteca (filesystems diferentes); as
+  importações do *arr são cópias.
 
 ### 11.4 Integrações
 
@@ -606,7 +620,7 @@ A configuração atual já foi aplicada no Pi (`RuntimeWatchdogUSec=15s`,
 - Meilisearch: parar o container e copiar o volume `meili-data`, ou usar os
   dumps da API.
 - Redis: copiar o volume `redis-data` (cache + `manual:torrents`).
-- Configs: `<MEDIA_ROOT>/docker` e guarde os arquivos `docker-compose.yml` e
+- Configs: `<CONFIG_ROOT>` e guarde os arquivos `docker-compose.yml` e
   `.env`. Inclui `radarr`, `sonarr2`, `prowlarr`, `bazarr`, `jellyfin`,
   `homepage`, `gaming-agent`, `media-agent` e `seerr`.
 - Backups já criados nesta etapa: `docker-compose.yml.bak.*`,
@@ -640,7 +654,7 @@ A configuração atual já foi aplicada no Pi (`RuntimeWatchdogUSec=15s`,
 - Prefira reserva DHCP/IP fixo para o Pi.
 - Segredos: não versionar `.env`, `config.yaml`, `settings.json`,
   `services.yaml`/`custom.js` do Homepage, nem os bancos dos *arr. A API key do
-  hook do Jellyfin fica em `<MEDIA_ROOT>/docker/{radarr,sonarr2}/scripts/.jellyfin_key`.
+  hook do Jellyfin fica em `<CONFIG_ROOT>/{radarr,sonarr2}/scripts/.jellyfin_key`.
 
 ### 11.9 Stack de mídia e automações
 

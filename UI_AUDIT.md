@@ -119,7 +119,7 @@ Objetivo: separar o `custom.js` em módulos por feature, **sem mudar comportamen
   - **A (recomendada):** ES modules + `esbuild --bundle --format=iife --target=es2020` (dev dependency só no diretório do homepage).
   - **B:** IIFEs com namespace `window.__hx` + script de concatenação sem dependências.
 - **Teste de paridade antes/depois:** screenshots 1400/390 de Início/Pedidos/Legendas, modal, histórico, storage e WOL (sem acionar), console sem erros, comparação de textos/classes.
-- **Deploy igual:** copiar o `custom.js` gerado para `<MEDIA_ROOT>/docker/homepage/custom.js`; hard refresh no navegador.
+- **Deploy igual:** copiar o `custom.js` gerado para `<CONFIG_ROOT>/homepage/custom.js`; hard refresh no navegador.
 - **Não misturar correções de comportamento nesta etapa**; ela é behavior-preserving.
 
 **Critério de aceite:** build reproduzível; `custom.js` gerado é classic script; paridade visual/funcional em desktop/mobile; zero erros de console; nenhum arquivo extra necessário em runtime; comandos de build documentados no repo.
