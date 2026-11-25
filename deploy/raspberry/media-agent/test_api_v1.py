@@ -118,7 +118,25 @@ class FakeSeerr(_Base):
                 return self._send(401, {"message": "não autenticado"})
             return self._send(200, {
                 "pageInfo": {"pages": 1, "results": 1},
-                "results": [{"id": 7, "requestedBy": {"displayName": "Wagner"}}],
+                "results": [{
+                    "id": 7,
+                    "requestedBy": {"displayName": "Wagner"},
+                    "media": {"id": 1, "mediaType": "movie", "tmdbId": 603, "status": 5},
+                }],
+            })
+        if self.path == "/api/v1/movie/603":
+            FakeSeerr.last_cookie = self.headers.get("Cookie")
+            if FakeSeerr.last_cookie != f"connect.sid={SEERR_COOKIE}":
+                return self._send(401, {"message": "não autenticado"})
+            return self._send(200, {
+                "id": 603, "title": "Matrix", "posterPath": "/matrix.jpg",
+            })
+        if self.path.startswith("/api/v1/tv/"):
+            FakeSeerr.last_cookie = self.headers.get("Cookie")
+            if FakeSeerr.last_cookie != f"connect.sid={SEERR_COOKIE}":
+                return self._send(401, {"message": "não autenticado"})
+            return self._send(200, {
+                "id": 1399, "name": "Serie", "posterPath": "/serie.jpg",
             })
         return self._send(404, {"message": "not found"})
 
@@ -344,6 +362,15 @@ class BffTest(unittest.TestCase):
         self.assertEqual(status, 200, data)
         self.assertEqual(len(data["results"]), 1)
         self.assertEqual(FakeSeerr.last_cookie, f"connect.sid={SEERR_COOKIE}")
+
+    def test_pedidos_enriquece_titulo_e_poster(self):
+        token, _ = self.login()
+        self.link(token)
+        status, data = http("GET", f"{self.public_url}/api/v1/requests", token=token)
+        self.assertEqual(status, 200, data)
+        media = data["results"][0]["media"]
+        self.assertEqual(media["title"], "Matrix")
+        self.assertEqual(media["posterPath"], "/matrix.jpg")
 
     def test_pedidos_sem_vincular(self):
         token, _ = self.login()

@@ -355,9 +355,11 @@ class SeerrClient:
         expires = cookie_expiry(attrs) - SESSION_MARGIN
         return cookie, expires, (data or {})
 
-    def call(self, cookie: str, method: str, path: str, body=None):
+    def call(self, cookie: str, method: str, path: str, body=None, timeout=None):
         status, _, text, data = self.http.json(
-            method, path, body=body, headers={"Cookie": f"connect.sid={cookie}"}
+            method, path, body=body,
+            headers={"Cookie": f"connect.sid={cookie}"},
+            timeout=timeout,
         )
         return status, text, data
 
@@ -621,6 +623,13 @@ class Services:
 def make_handler(services: Services, public: bool):
     cfg = services.cfg
 
+    # Cache de metadados do Seerr (título/pôster) por (mediaType, tmdbId).
+    # O payload de /request não traz pôster; buscamos uma vez e reusamos.
+    meta_cache: dict[tuple[str, int], tuple[float, dict]] = {}
+    meta_cache_lock = threading.Lock()
+    meta_ttl = 6 * 3600.0
+    meta_timeout = 3.0
+
     class Handler(BaseHTTPRequestHandler):
         server_version = f"family-bff/{VERSION}"
         protocol_version = "HTTP/1.1"
@@ -858,6 +867,57 @@ def make_handler(services: Services, public: bool):
                 )
             raise ApiError(502, "seerr_unavailable", f"Seerr respondeu {status}")
 
+        def _seerr_metadata(self, cookie: str, media_type: str, tmdb_id: int):
+            """Busca título/pôster no Seerr, com cache em memória (6 h)."""
+            key = (media_type, tmdb_id)
+            now = time.time()
+            with meta_cache_lock:
+                cached = meta_cache.get(key)
+                if cached and cached[0] > now:
+                    return cached[1]
+            status, _, meta = services.seerr.call(
+                cookie, "GET", f"/api/v1/{media_type}/{tmdb_id}",
+                timeout=meta_timeout,
+            )
+            if status != 200 or not isinstance(meta, dict):
+                return None
+            with meta_cache_lock:
+                meta_cache[key] = (now + meta_ttl, meta)
+            return meta
+
+        def _enrich_requests(self, cookie: str, data):
+            """Preenche title/name/posterPath que o /request não devolve."""
+            if not isinstance(data, dict):
+                return data
+            results = data.get("results")
+            if not isinstance(results, list):
+                return data
+            for pedido in results:
+                if not isinstance(pedido, dict):
+                    continue
+                media = pedido.get("media")
+                if not isinstance(media, dict):
+                    continue
+                media_type = media.get("mediaType")
+                try:
+                    tmdb_id = int(media.get("tmdbId"))
+                except (TypeError, ValueError):
+                    continue
+                if media_type not in ("movie", "tv"):
+                    continue
+                ja_tem_titulo = bool(media.get("title") or media.get("name"))
+                if ja_tem_titulo and media.get("posterPath"):
+                    continue
+                meta = self._seerr_metadata(cookie, media_type, tmdb_id)
+                if not meta:
+                    continue
+                if media_type == "movie":
+                    media["title"] = media.get("title") or meta.get("title")
+                else:
+                    media["name"] = media.get("name") or meta.get("name")
+                media["posterPath"] = media.get("posterPath") or meta.get("posterPath")
+            return data
+
         def _list_requests(self) -> None:
             identity = self._identity()
             cookie = self._seerr_cookie(identity)
@@ -870,7 +930,8 @@ def make_handler(services: Services, public: bool):
                 "GET",
                 f"/api/v1/request?take={take}&skip={skip}&filter={status_filter}&sort=added",
             )
-            self._send(200, self._seerr_result(status, text, data))
+            data = self._seerr_result(status, text, data)
+            self._send(200, self._enrich_requests(cookie, data))
 
         def _search(self) -> None:
             identity = self._identity()
