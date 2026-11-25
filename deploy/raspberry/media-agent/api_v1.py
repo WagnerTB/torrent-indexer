@@ -1085,6 +1085,27 @@ def make_handler(services: Services, public: bool):
             )
             return bool(animation and details.get("originalLanguage") in ("ja", "zh", "ko"))
 
+        def _owner_entries(self, user_id: str):
+            try:
+                data = services.media_agent.get(
+                    f"/pack-owners?user_id={quote(str(user_id))}", timeout=6
+                )
+            except ApiError:
+                return []
+            return [
+                pair for pair in (data.get("pairs") or [])
+                if isinstance(pair, dict)
+            ]
+
+        def _pack_owner_pairs(self, user_id: str):
+            pairs = set()
+            for pair in self._owner_entries(user_id):
+                tvdb_id = to_int(pair.get("tvdbId"))
+                season = to_int(pair.get("season"))
+                if tvdb_id and season is not None:
+                    pairs.add((tvdb_id, season))
+            return pairs
+
         def _request_pairs(self, cookie: str, identity):
             """{(tvdbId, temporada)} dos pedidos do usuário (None = indisponível)."""
             user_id = str(identity.get("sub") or "")
@@ -1093,6 +1114,7 @@ def make_handler(services: Services, public: bool):
                 cached = pairs_cache.get(user_id)
                 if cached and cached[0] > now:
                     return cached[1]
+            owner_pairs = self._pack_owner_pairs(user_id)
             status, _, data = services.seerr.call(
                 cookie,
                 "GET",
@@ -1100,8 +1122,8 @@ def make_handler(services: Services, public: bool):
                 timeout=8,
             )
             if status != 200 or not isinstance(data, dict):
-                return None
-            pairs = set()
+                return owner_pairs or None
+            pairs = set(owner_pairs)
             for request in data.get("results") or []:
                 if not isinstance(request, dict):
                     continue
@@ -1142,6 +1164,154 @@ def make_handler(services: Services, public: bool):
             with pack_cache_lock:
                 pack_cache[tvdb_id] = (now + pack_ttl, jobs)
             return jobs
+
+        def _tvdb_from(self, details):
+            external = (details or {}).get("externalIds") or {}
+            return to_int(external.get("tvdbId"))
+
+        def _season_numbers(self, value, details):
+            if value in (None, [], "all"):
+                numbers = []
+                for season in (details or {}).get("seasons") or []:
+                    if not isinstance(season, dict):
+                        continue
+                    number = to_int(season.get("seasonNumber"))
+                    if number and number > 0:
+                        numbers.append(number)
+                return numbers
+            numbers = []
+            for item in value:
+                number = to_int(item)
+                if number and number > 0:
+                    numbers.append(number)
+            return numbers
+
+        def _claim_owners(self, identity, tvdb_id, seasons, details=None) -> None:
+            numbers = [
+                number for number in (
+                    to_int(
+                        season.get("seasonNumber")
+                        if isinstance(season, dict) else season
+                    )
+                    for season in (seasons or [])
+                )
+                if number is not None and number > 0
+            ]
+            if not tvdb_id or not numbers:
+                return
+            try:
+                services.media_agent.post(
+                    "/pack-owners",
+                    {
+                        "user_id": str(identity["sub"]),
+                        "tvdbId": tvdb_id,
+                        "seasons": numbers,
+                        "tmdbId": to_int((details or {}).get("id")),
+                        "title": (details or {}).get("name") or "",
+                        "posterPath": (details or {}).get("posterPath") or "",
+                    },
+                    timeout=8,
+                )
+                with pairs_cache_lock:
+                    pairs_cache.pop(str(identity["sub"]), None)
+            except ApiError:
+                pass
+
+        def _fallback_seasons(self, identity, details, seasons) -> int:
+            """Seerr recusou (temporada parcial): monitora e cria o job no agente."""
+            tvdb_id = self._tvdb_from(details)
+            if not tvdb_id or not seasons:
+                return 0
+            title = (details or {}).get("name") or ""
+            monitored = 0
+            for season in seasons:
+                try:
+                    data = services.media_agent.post(
+                        "/sonarr/season/monitor",
+                        {
+                            "tvdbId": tvdb_id,
+                            "season": season,
+                            "monitored": True,
+                            "search": False,
+                        },
+                        timeout=8,
+                    )
+                    if data.get("ok"):
+                        monitored += 1
+                    services.media_agent.post(
+                        "/pack-jobs/ensure",
+                        {"tvdbId": tvdb_id, "season": season, "title": title},
+                        timeout=8,
+                    )
+                except ApiError:
+                    continue
+            if monitored:
+                self._claim_owners(identity, tvdb_id, seasons, details)
+            return monitored
+
+        def _append_local_packs(self, identity, data):
+            """Inclui no /requests os packs pedidos fora do Seerr (temporada parcial)."""
+            if not isinstance(data, dict):
+                return data
+            results = data.get("results")
+            if not isinstance(results, list):
+                return data
+            owners = self._owner_entries(str(identity.get("sub") or ""))
+            if not owners:
+                return data
+            covered = set()
+            for request in results:
+                media = request.get("media") or {}
+                tvdb_id = to_int(media.get("tvdbId"))
+                if not tvdb_id:
+                    continue
+                for season in request.get("seasons") or []:
+                    number = to_int(
+                        season.get("seasonNumber")
+                        if isinstance(season, dict) else season
+                    )
+                    if number is not None:
+                        covered.add((tvdb_id, number))
+            appended = 0
+            for owner in owners:
+                tvdb_id = to_int(owner.get("tvdbId"))
+                season = to_int(owner.get("season"))
+                if not tvdb_id or season is None or (tvdb_id, season) in covered:
+                    continue
+                job = next(
+                    (
+                        item for item in self._pack_jobs_for(tvdb_id)
+                        if to_int(item.get("season")) == season
+                    ),
+                    None,
+                )
+                if not job:
+                    continue
+                results.append({
+                    "id": -(tvdb_id * 1000 + season),
+                    "status": 2,
+                    "type": "tv",
+                    "requestedBy": {"displayName": identity.get("name") or ""},
+                    "createdAt": job.get("updatedAt"),
+                    "seasons": [{"seasonNumber": season, "status": 1}],
+                    "media": {
+                        "id": None,
+                        "mediaType": "tv",
+                        "tmdbId": to_int(owner.get("tmdbId")),
+                        "tvdbId": tvdb_id,
+                        "name": owner.get("title") or "",
+                        "posterPath": owner.get("posterPath") or "",
+                        "status": 3,
+                    },
+                })
+                covered.add((tvdb_id, season))
+                appended += 1
+            if appended:
+                data["results"] = results
+                info = data.get("pageInfo")
+                if isinstance(info, dict):
+                    info["results"] = len(results)
+            return data
 
         def _enrich_requests(self, cookie: str, data):
             """Adiciona pôster/título (Seerr), status/progresso (*arr) e pack."""
@@ -1248,6 +1418,7 @@ def make_handler(services: Services, public: bool):
                 f"/api/v1/request?take={take}&skip={skip}&filter={status_filter}&sort=added",
             )
             data = self._seerr_result(status, text, data)
+            data = self._append_local_packs(identity, data)
             self._send(200, self._enrich_requests(cookie, data))
 
         def _notification_visible(self, note, pairs) -> bool:
@@ -1686,10 +1857,46 @@ def make_handler(services: Services, public: bool):
             status, text, data = services.seerr.call(
                 cookie, "POST", "/api/v1/request", body=payload
             )
-            if status in (200, 201, 202) and data is not None:
-                if media_type == "tv" and isinstance(payload.get("seasons"), list):
-                    self._ensure_seasons_monitored(details, payload["seasons"])
+            if status in (200, 201) or (
+                status == 202 and isinstance(data, dict) and data.get("id")
+            ):
+                if media_type == "tv":
+                    requested = self._season_numbers(payload.get("seasons"), details)
+                    created = data.get("seasons") if isinstance(data, dict) else None
+                    missing = []
+                    if isinstance(created, list) and created:
+                        created_numbers = {
+                            to_int(item.get("seasonNumber"))
+                            for item in created if isinstance(item, dict)
+                        }
+                        missing = [
+                            number for number in requested
+                            if number not in created_numbers
+                        ]
+                    self._ensure_seasons_monitored(details, requested)
+                    if missing:
+                        self._fallback_seasons(identity, details, missing)
+                    self._claim_owners(
+                        identity, self._tvdb_from(details), requested, details
+                    )
                 return self._send(201, data)
+            if status == 202:
+                message = str(
+                    (data or {}).get("message")
+                    or "Nenhuma temporada disponível para pedir."
+                )
+                if media_type == "tv":
+                    requested = self._season_numbers(payload.get("seasons"), details)
+                    if self._fallback_seasons(identity, details, requested):
+                        return self._send(201, {
+                            "fallback": True,
+                            "mediaType": "tv",
+                            "mediaId": media_id,
+                            "seasons": [
+                                {"seasonNumber": number} for number in requested
+                            ],
+                        })
+                raise ApiError(409, "no_seasons_available", message)
             if status == 409:
                 raise ApiError(409, "already_requested", "pedido já existente")
             self._seerr_result(status, text, data)

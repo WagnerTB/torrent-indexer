@@ -588,6 +588,18 @@ def _db_init():
                     value TEXT,
                     updated_at TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS pack_owners (
+                    tvdb_id INTEGER NOT NULL,
+                    season INTEGER NOT NULL,
+                    user_id TEXT NOT NULL,
+                    tmdb_id INTEGER,
+                    title TEXT,
+                    poster_path TEXT,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (tvdb_id, season, user_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_pack_owners_user ON pack_owners(user_id);
                 """
             )
             conn.commit()
@@ -3104,6 +3116,93 @@ def devices_remove(user_id, device_id):
     return {"ok": True, "removed": removed}
 
 
+def pack_owners_upsert(payload):
+    """Quem pediu cada temporada (inclui fallback sem request no Seerr)."""
+    payload = payload or {}
+    user_id = str(payload.get("user_id") or "").strip()
+    tvdb_id = _as_int(payload.get("tvdbId") or payload.get("tvdb_id"))
+    seasons = {
+        _as_int(season) for season in (payload.get("seasons") or [])
+    }
+    seasons.discard(None)
+    if not user_id or not tvdb_id or not seasons:
+        return {"ok": False, "error": "user_id/tvdbId/seasons obrigatórios"}
+    now = _now_iso()
+    tmdb_id = _as_int(payload.get("tmdbId"))
+    title = str(payload.get("title") or "")
+    poster_path = str(payload.get("posterPath") or "")
+    with _db_lock:
+        conn = _db_connect()
+        try:
+            for season in sorted(seasons):
+                conn.execute(
+                    "INSERT INTO pack_owners "
+                    "(tvdb_id, season, user_id, tmdb_id, title, poster_path, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(tvdb_id, season, user_id) DO UPDATE SET "
+                    "tmdb_id = excluded.tmdb_id, title = excluded.title, "
+                    "poster_path = excluded.poster_path",
+                    (tvdb_id, season, user_id, tmdb_id, title, poster_path, now),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    return {"ok": True, "tvdbId": tvdb_id, "seasons": sorted(seasons)}
+
+
+def pack_owners_payload(user_id):
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        return {"ok": False, "error": "user_id obrigatório"}
+    rows = _db_rows(
+        "SELECT tvdb_id, season, tmdb_id, title, poster_path FROM pack_owners "
+        "WHERE user_id = ? ORDER BY tvdb_id, season",
+        (user_id,),
+    )
+    return {
+        "ok": True,
+        "pairs": [
+            {
+                "tvdbId": row["tvdb_id"],
+                "season": row["season"],
+                "tmdbId": row["tmdb_id"],
+                "title": row["title"] or "",
+                "posterPath": row["poster_path"] or "",
+            }
+            for row in rows
+        ],
+    }
+
+
+def pack_job_ensure(payload):
+    """Cria o job (queued) se ainda não existir, para o card aparecer já."""
+    payload = payload or {}
+    tvdb_id = _as_int(payload.get("tvdbId") or payload.get("tvdb_id"))
+    season = _as_int(payload.get("season"))
+    if not tvdb_id or season is None or season <= 0:
+        return {"ok": False, "error": "tvdbId/season inválidos"}
+    key = _pack_key(tvdb_id, season)
+    job = _pack_job_get(key)
+    if job:
+        return {"ok": True, "created": False, "job": _pack_job_public(job)}
+    title = str(payload.get("title") or "")
+    job = _pack_job_upsert({
+        "key": key,
+        "tvdb_id": tvdb_id,
+        "series_id": _as_int(payload.get("seriesId")),
+        "season": season,
+        "profile_id": _as_int(payload.get("profileId")),
+        "profile_name": "",
+        "status": "queued",
+        "attempts": 0,
+        "max_attempts": PACK_MAX_ATTEMPTS,
+        "next_attempt_at": None,
+        "created_at": _now_iso(),
+        "meta": {"title": title, "fallback": True},
+    })
+    return {"ok": True, "created": True, "job": _pack_job_public(job)}
+
+
 # --- Worker ---------------------------------------------------------------
 
 
@@ -4044,6 +4143,10 @@ class Handler(BaseHTTPRequestHandler):
             ))
         elif self.path.startswith("/pack-worker/health"):
             self._json(200, pack_worker_health())
+        elif self.path.startswith("/pack-owners"):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            self._json(200, pack_owners_payload((params.get("user_id") or [""])[0]))
         elif self.path.startswith("/pack-jobs"):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
@@ -4108,6 +4211,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, pack_retry(self._read_json()))
         elif self.path.startswith("/pack-jobs/accept-single"):
             self._json(200, pack_accept_single(self._read_json()))
+        elif self.path.startswith("/pack-jobs/ensure"):
+            self._json(200, pack_job_ensure(self._read_json()))
+        elif self.path.startswith("/pack-owners"):
+            self._json(200, pack_owners_upsert(self._read_json()))
         elif self.path.startswith("/notifications/read-all"):
             body = self._read_json()
             self._json(200, notifications_mark_all_read(body.get("user_id")))

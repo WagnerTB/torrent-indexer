@@ -275,5 +275,43 @@ class PackDeviceTests(PackDbCase):
         self.assertFalse(ma.devices_upsert({"user_id": "u1", "device_id": "d1"})["ok"])
 
 
+class PackOwnerTests(PackDbCase):
+    def test_upsert_e_listagem(self):
+        result = ma.pack_owners_upsert({
+            "user_id": "u1", "tvdbId": 360295, "seasons": [1, 2],
+            "tmdbId": 68507, "title": "His Dark Materials", "posterPath": "/x.jpg",
+        })
+        self.assertTrue(result["ok"])
+        pairs = ma.pack_owners_payload("u1")["pairs"]
+        self.assertEqual({pair["season"] for pair in pairs}, {1, 2})
+        self.assertEqual(pairs[0]["tmdbId"], 68507)
+        self.assertEqual(pairs[0]["title"], "His Dark Materials")
+
+        ma.pack_owners_upsert({
+            "user_id": "u1", "tvdbId": 360295, "seasons": [1],
+            "tmdbId": 68507, "title": "HDM", "posterPath": "/y.jpg",
+        })
+        pairs = ma.pack_owners_payload("u1")["pairs"]
+        self.assertEqual(len(pairs), 2)
+        season1 = next(pair for pair in pairs if pair["season"] == 1)
+        self.assertEqual(season1["title"], "HDM")
+        self.assertEqual(season1["posterPath"], "/y.jpg")
+
+    def test_exige_dados(self):
+        self.assertFalse(ma.pack_owners_upsert({"user_id": "u1"})["ok"])
+
+
+class PackJobEnsureTests(PackDbCase):
+    def test_cria_queued_sem_sobrescrever(self):
+        first = ma.pack_job_ensure({"tvdbId": 360295, "season": 1, "title": "HDM"})
+        self.assertTrue(first["created"])
+        self.assertEqual(first["job"]["status"], "queued")
+        self.assertEqual(first["job"]["key"], "tvdb:360295:s1")
+
+        second = ma.pack_job_ensure({"tvdbId": 360295, "season": 1})
+        self.assertFalse(second["created"])
+        self.assertEqual(second["job"]["key"], "tvdb:360295:s1")
+
+
 if __name__ == "__main__":
     unittest.main()

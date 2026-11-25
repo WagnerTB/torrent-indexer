@@ -84,6 +84,8 @@ class FakeSeerr(_Base):
     login_calls = 0
     include_tv_request = False
     last_request_body = None
+    request_status = 201
+    request_payload = None
 
     TV_PAYLOADS = {
         37680: {
@@ -159,6 +161,11 @@ class FakeSeerr(_Base):
             FakeSeerr.last_cookie = self.headers.get("Cookie")
             if FakeSeerr.last_cookie != f"connect.sid={SEERR_COOKIE}":
                 return self._send(401, {"message": "não autenticado"})
+            if FakeSeerr.request_status != 201:
+                return self._send(
+                    FakeSeerr.request_status,
+                    FakeSeerr.request_payload or {"message": "erro"},
+                )
             return self._send(201, {"id": 99, "status": 1, "echo": body})
         return self._send(404, {"message": "not found"})
 
@@ -262,6 +269,7 @@ def start(handler_cls):
 
 class FakeMediaAgent(_Base):
     last = {}
+    owner_pairs = []
 
     PACK_JOBS = [
         {
@@ -291,6 +299,15 @@ class FakeMediaAgent(_Base):
             "quality": None, "aired": 10, "files": 0, "missing": 10,
             "audioStatus": None, "progress": None, "dryRun": False,
             "error": "Sem pack completo", "updatedAt": "2026-11-25T23:00:00Z",
+        },
+        {
+            "key": "tvdb:360295:s1", "tvdbId": 360295, "seriesId": 11, "season": 1,
+            "status": "queued", "statusLabel": "Na fila para procura", "attempt": 0,
+            "maxAttempts": 3, "nextAttemptAt": None, "queuePosition": 2,
+            "title": "His Dark Materials", "releaseTitle": "", "sizeGb": None,
+            "seeders": None, "quality": None, "aired": 8, "files": 2, "missing": 6,
+            "audioStatus": None, "progress": None, "dryRun": True, "error": "",
+            "updatedAt": "2026-11-25T23:40:00Z",
         },
     ]
 
@@ -353,7 +370,14 @@ class FakeMediaAgent(_Base):
                 jobs = [job for job in jobs if job["tvdbId"] == 247808]
             elif "tvdbId=999" in self.path:
                 jobs = [job for job in jobs if job["tvdbId"] == 999]
+            elif "tvdbId=360295" in self.path:
+                jobs = [job for job in jobs if job["tvdbId"] == 360295]
             return self._send(200, {"ok": True, "jobs": jobs, "count": len(jobs)})
+        if self.path.startswith("/pack-owners"):
+            return self._send(200, {
+                "ok": True,
+                "pairs": FakeMediaAgent.owner_pairs,
+            })
         if self.path.startswith("/notifications"):
             items = [dict(item) for item in FakeMediaAgent.NOTIFICATIONS]
             if "user_id=u-admin" in self.path:
@@ -382,6 +406,10 @@ class FakeMediaAgent(_Base):
             return self._send(200, {"ok": True, "job": {"status": "queued"}})
         if self.path.startswith("/pack-jobs/accept-single"):
             return self._send(200, {"ok": True, "episode": {"episodeNumber": 8}})
+        if self.path.startswith("/pack-jobs/ensure"):
+            return self._send(200, {"ok": True, "created": True, "job": {"status": "queued"}})
+        if self.path.startswith("/pack-owners"):
+            return self._send(200, {"ok": True})
         if self.path.startswith("/sonarr/season/monitor"):
             return self._send(200, {"ok": True, "monitored": 12})
         if self.path.startswith("/notifications/read"):
@@ -458,7 +486,10 @@ class BffTest(unittest.TestCase):
         FakeSeerr.last_cookie = None
         FakeSeerr.include_tv_request = False
         FakeSeerr.last_request_body = None
+        FakeSeerr.request_status = 201
+        FakeSeerr.request_payload = None
         FakeMediaAgent.last = {}
+        FakeMediaAgent.owner_pairs = []
         FakeJellyfin.me_calls = 0
         self.services.auth._cache.clear()
         self.services.store.delete("u-user", "dev-1")
@@ -1000,6 +1031,57 @@ class BffTest(unittest.TestCase):
         temporadas = {job["season"] for job in media["packs"]}
         self.assertEqual(temporadas, {1})
         self.assertNotIn(999, [job["tvdbId"] for job in media["packs"]])
+
+    def test_temporada_parcial_usa_fallback(self):
+        FakeSeerr.request_status = 202
+        FakeSeerr.request_payload = {"message": "No seasons available to request"}
+        token, _ = self.login()
+        self.link(token)
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests",
+            {"media_type": "tv", "media_id": 37680, "seasons": [1],
+             "profile": "legendado"},
+            token=token,
+        )
+        self.assertEqual(status, 201, data)
+        self.assertTrue(data.get("fallback"))
+        self.assertIn("/sonarr/season/monitor", FakeMediaAgent.last)
+        self.assertIn("/pack-jobs/ensure", FakeMediaAgent.last)
+        self.assertEqual(FakeMediaAgent.last["/pack-owners"]["user_id"], "u-user")
+        self.assertEqual(FakeMediaAgent.last["/pack-owners"]["seasons"], [1])
+
+    def test_202_sem_serie_vira_409(self):
+        FakeSeerr.request_status = 202
+        FakeSeerr.request_payload = {"message": "No seasons available to request"}
+        token, _ = self.login()
+        self.link(token)
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests",
+            {"media_type": "tv", "media_id": 1399, "seasons": [1]},
+            token=token,
+        )
+        self.assertEqual(status, 409, data)
+        self.assertEqual(data["code"], "no_seasons_available")
+
+    def test_requests_inclui_pack_local(self):
+        FakeMediaAgent.owner_pairs = [{
+            "tvdbId": 360295, "season": 1, "tmdbId": 68507,
+            "title": "His Dark Materials", "posterPath": "/hdm.jpg",
+        }]
+        token, _ = self.login()
+        self.link(token)
+        status, data = http("GET", f"{self.public_url}/api/v1/requests", token=token)
+        self.assertEqual(status, 200, data)
+        cards = [
+            item for item in data["results"]
+            if (item.get("media") or {}).get("tvdbId") == 360295
+        ]
+        self.assertEqual(len(cards), 1, data)
+        media = cards[0]["media"]
+        self.assertEqual(media["name"], "His Dark Materials")
+        self.assertEqual(media["posterPath"], "/hdm.jpg")
+        self.assertEqual(media["pack"]["key"], "tvdb:360295:s1")
+        self.assertEqual(media["pack"]["status"], "queued")
 
     def test_retry_pack(self):
         token, _ = self.login()
