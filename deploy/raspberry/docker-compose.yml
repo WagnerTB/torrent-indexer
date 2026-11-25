@@ -376,6 +376,7 @@ services:
       BAZARR_URL: http://${LAN_IP}:6767
       PROWLARR_URL: http://${LAN_IP}:9696
       QBITTORRENT_URL: http://${LAN_IP}:8082
+      GAMING_URL: http://${LAN_IP}:8100
       ALLOWED_NETWORKS: ${ALLOWED_NETWORKS:?set ALLOWED_NETWORKS in .env}
       V1_TOKEN_TTL: "3600"
       V1_LOG_LEVEL: INFO

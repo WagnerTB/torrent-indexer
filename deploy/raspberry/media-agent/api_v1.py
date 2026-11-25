@@ -35,6 +35,8 @@ Rotas públicas:
     GET  /api/v1/search           ?q=&page=&language=
     GET  /api/v1/house
     GET  /api/v1/services
+    GET  /api/v1/pc
+    POST /api/v1/pc/wake
     GET  /api/v1/subs/quota
 
 Rotas de admin (só no listener --admin):
@@ -589,6 +591,7 @@ class Config:
     timeout: float = 10.0
     allowed_networks: tuple = field(default_factory=tuple)
     media_agent_url: str = "http://127.0.0.1:8097"
+    gaming_url: str = "http://127.0.0.1:8100"
     radarr_url: str = "http://127.0.0.1:7878"
     sonarr_url: str = "http://127.0.0.1:8989"
     bazarr_url: str = "http://127.0.0.1:6767"
@@ -616,6 +619,7 @@ class Config:
             timeout=float(os.getenv("V1_TIMEOUT", "10")),
             allowed_networks=tuple(networks),
             media_agent_url=os.getenv("MEDIA_AGENT_URL", "http://127.0.0.1:8097"),
+            gaming_url=os.getenv("GAMING_URL", "http://127.0.0.1:8100"),
             radarr_url=os.getenv("RADARR_URL", "http://127.0.0.1:7878"),
             sonarr_url=os.getenv("SONARR_URL", "http://127.0.0.1:8989"),
             bazarr_url=os.getenv("BAZARR_URL", "http://127.0.0.1:6767"),
@@ -807,6 +811,10 @@ def make_handler(services: Services, public: bool):
                 return self._house()
             if path == "/api/v1/services" and method == "GET":
                 return self._services()
+            if path == "/api/v1/pc" and method == "GET":
+                return self._pc()
+            if path == "/api/v1/pc/wake" and method == "POST":
+                return self._wake()
             if path == "/api/v1/subs/quota" and method == "GET":
                 return self._subs_quota()
             if path == "/api/v1/admin/ping" and method == "GET":
@@ -1106,6 +1114,43 @@ def make_handler(services: Services, public: bool):
             with services_cache_lock:
                 services_cache["data"] = (now + services_ttl, payload)
             self._send(200, payload)
+
+        def _pc(self) -> None:
+            self._identity()
+            try:
+                client = HttpJson(cfg.gaming_url, timeout=4.0)
+                status, _, text = client.request("GET", "/status", timeout=4.0)
+            except Exception as exc:
+                raise ApiError(
+                    503, "pc_unavailable", f"gaming-agent inacessível: {exc}"
+                ) from None
+            data = parse_json(text)
+            if status != 200 or not isinstance(data, dict):
+                raise ApiError(503, "pc_unavailable", f"gaming-agent respondeu {status}")
+            # Não expõe IP/MAC do PC para o app.
+            self._send(200, {
+                "ok": True,
+                "online": bool(data.get("online")),
+                "status": data.get("status"),
+                "checked_at": data.get("checked_at"),
+            })
+
+        def _wake(self) -> None:
+            self._identity()
+            try:
+                client = HttpJson(cfg.gaming_url, timeout=6.0)
+                status, _, text = client.request("POST", "/wake", timeout=6.0)
+            except Exception as exc:
+                raise ApiError(
+                    503, "pc_unavailable", f"gaming-agent inacessível: {exc}"
+                ) from None
+            data = parse_json(text)
+            if status != 200 or not isinstance(data, dict):
+                raise ApiError(503, "pc_unavailable", f"gaming-agent respondeu {status}")
+            self._send(200, {
+                "ok": bool(data.get("ok")),
+                "sent": bool(data.get("ok")),
+            })
 
         def _subs_quota(self) -> None:
             self._identity()

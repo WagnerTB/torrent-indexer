@@ -141,6 +141,28 @@ class FakeSeerr(_Base):
         return self._send(404, {"message": "not found"})
 
 
+class FakeGaming(_Base):
+    def do_GET(self):
+        if self.path == "/status":
+            return self._send(200, {
+                "online": False,
+                "status": "Desligado",
+                "ips": {"192.168.1.2": False},
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "checked_at": "2026-11-25T00:00:00+0000",
+            })
+        return self._send(404, {"message": "not found"})
+
+    def do_POST(self):
+        if self.path == "/wake":
+            return self._send(200, {
+                "ok": True,
+                "ips": {"192.168.1.2": False},
+                "mac": "AA:BB:CC:DD:EE:FF",
+            })
+        return self._send(404, {"message": "not found"})
+
+
 def start(handler_cls):
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
     server.daemon_threads = True
@@ -207,6 +229,7 @@ class BffTest(unittest.TestCase):
         cls.jellyfin, cls.jellyfin_url = start(FakeJellyfin)
         cls.seerr, cls.seerr_url = start(FakeSeerr)
         cls.media, cls.media_url = start(FakeMediaAgent)
+        cls.gaming, cls.gaming_url = start(FakeGaming)
 
         cls.cfg = api_v1.Config(
             jellyfin_url=cls.jellyfin_url,
@@ -218,6 +241,7 @@ class BffTest(unittest.TestCase):
             timeout=5,
             allowed_networks=(api_v1.ipaddress.ip_network("127.0.0.0/8"),),
             media_agent_url=cls.media_url,
+            gaming_url=cls.gaming_url,
             rate_limit_session=1000,
             rate_limit_default=1000,
         )
@@ -235,6 +259,7 @@ class BffTest(unittest.TestCase):
         cls.jellyfin.shutdown()
         cls.seerr.shutdown()
         cls.media.shutdown()
+        cls.gaming.shutdown()
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def setUp(self):
@@ -498,6 +523,26 @@ class BffTest(unittest.TestCase):
 
     def test_services_sem_auth(self):
         status, data = http("GET", f"{self.public_url}/api/v1/services")
+        self.assertEqual(status, 401)
+        self.assertEqual(data["code"], "unauthorized")
+
+    def test_pc_status(self):
+        token, _ = self.login()
+        status, data = http("GET", f"{self.public_url}/api/v1/pc", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertFalse(data["online"])
+        self.assertEqual(data["status"], "Desligado")
+        self.assertNotIn("mac", data)
+        self.assertNotIn("ips", data)
+
+    def test_pc_wake(self):
+        token, _ = self.login()
+        status, data = http("POST", f"{self.public_url}/api/v1/pc/wake", {}, token=token)
+        self.assertEqual(status, 200, data)
+        self.assertTrue(data["ok"])
+
+    def test_pc_sem_auth(self):
+        status, data = http("GET", f"{self.public_url}/api/v1/pc")
         self.assertEqual(status, 401)
         self.assertEqual(data["code"], "unauthorized")
 
