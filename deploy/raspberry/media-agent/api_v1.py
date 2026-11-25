@@ -1135,6 +1135,9 @@ def make_handler(services: Services, public: bool):
             min_votes = _int("min_votes") or 1000
             sort = (query.get("sort") or ["popular"])[0].lower()
             page = max(_int("page") or 1, 1)
+            enrich = (query.get("enrich") or ["1"])[0].lower() not in (
+                "0", "false", "no"
+            )
 
             sort_by = "vote_average.desc" if sort == "rating" else "popularity.desc"
             default_lte = (
@@ -1145,7 +1148,7 @@ def make_handler(services: Services, public: bool):
 
             cache_key = (
                 f"{media_type}|{genre}|{year_min}|{year_max}|"
-                f"{min_rating}|{min_votes}|{sort}|{page}"
+                f"{min_rating}|{min_votes}|{sort}|{page}|{1 if enrich else 0}"
             )
             now = time.time()
             with discover_cache_lock:
@@ -1209,30 +1212,36 @@ def make_handler(services: Services, public: bool):
                 if idx < len(series):
                     misto.append(series[idx])
 
-            # O discover (sem language) vem em inglês; o metadata do Seerr
-            # preenche mediaInfo e o que faltar. Cache de 10 min.
+            # O discover (sem language) vem em inglês. A Home enriquece os
+            # primeiros itens (mediaInfo/título); a sub-tela pede enrich=0
+            # para abrir rápido. Cache de 10 min.
             selecionados = misto[:20]
-            for item in selecionados:
-                meta = self._seerr_metadata(
-                    cookie, item["mediaType"], item["id"]
-                )
-                if not isinstance(meta, dict):
-                    continue
-                item["title"] = (
-                    meta.get("title") or meta.get("name") or item["title"]
-                )
-                item["overview"] = meta.get("overview") or item["overview"]
-                item["posterPath"] = meta.get("posterPath") or item["posterPath"]
-                item["backdropPath"] = (
-                    meta.get("backdropPath") or item["backdropPath"]
-                )
-                item["releaseDate"] = meta.get("releaseDate") or item["releaseDate"]
-                item["firstAirDate"] = (
-                    meta.get("firstAirDate") or item["firstAirDate"]
-                )
-                if meta.get("voteAverage") is not None:
-                    item["voteAverage"] = meta.get("voteAverage")
-                item["mediaInfo"] = meta.get("mediaInfo") or item.get("mediaInfo")
+            if enrich:
+                for item in selecionados[:12]:
+                    meta = self._seerr_metadata(
+                        cookie, item["mediaType"], item["id"]
+                    )
+                    if not isinstance(meta, dict):
+                        continue
+                    item["title"] = (
+                        meta.get("title") or meta.get("name") or item["title"]
+                    )
+                    item["overview"] = meta.get("overview") or item["overview"]
+                    item["posterPath"] = meta.get("posterPath") or item["posterPath"]
+                    item["backdropPath"] = (
+                        meta.get("backdropPath") or item["backdropPath"]
+                    )
+                    item["releaseDate"] = (
+                        meta.get("releaseDate") or item["releaseDate"]
+                    )
+                    item["firstAirDate"] = (
+                        meta.get("firstAirDate") or item["firstAirDate"]
+                    )
+                    if meta.get("voteAverage") is not None:
+                        item["voteAverage"] = meta.get("voteAverage")
+                    item["mediaInfo"] = (
+                        meta.get("mediaInfo") or item.get("mediaInfo")
+                    )
 
             payload = {
                 "ok": True,
