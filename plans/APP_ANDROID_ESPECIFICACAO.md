@@ -27,11 +27,11 @@ Ao terminar o Marco 1, rode ./gradlew test e descreva como testar no aparelho.
 
 | Peça | Onde | Estado |
 |---|---|---|
-| BFF `/api/v1` | `api_v1.py`, container `media-bff` | no ar, 37 testes |
+| BFF `/api/v1` | `api_v1.py`, container `media-bff` | no ar, 50 testes (1 falha só no Windows) |
 | Auth Jellyfin + sessão HMAC | `POST /api/v1/session` | ok |
 | Sessão do Seerr por pessoa | `POST /api/v1/session/seerr` | ok, cookie 30 d |
-| Pedidos (listar/criar/buscar) | `/api/v1/requests`, `/api/v1/search` | ok |
-| Casa e legendas | `/api/v1/house`, `/api/v1/subs/quota` | ok |
+| Pedidos (listar/criar/buscar/descobrir) | `/api/v1/requests`, `/api/v1/search`, `/api/v1/discover` | ok |
+| Casa, serviços e legendas | `/api/v1/house`, `/api/v1/services`, `/api/v1/pc`, `/api/v1/subs/quota`, `/api/v1/subs/queue` | ok |
 | Download/importações (admin) | `/api/v1/admin/downloads` | ok, só LAN |
 | Túnel | `cloudflared` + `<BFF_HOST>` | rota criada, DNS em propagação |
 
@@ -249,12 +249,28 @@ Base = URL do BFF. Header: `Authorization: Bearer <bff>` (exceto `/status`). Err
 |---|---|
 | `GET /api/v1/status` | `{"status":"ok","version":"0.1.0","time":"..."}` (sem auth) |
 | `GET /api/v1/me` | `{"user":{"id","name","is_admin"},"device_id","seerr_linked","seerr_expires_at"}` |
-| `GET /api/v1/requests?take=50&skip=0&filter=all` | payload do Seerr: `{"pageInfo":{...},"results":[{"id","status","media":{...},"requestedBy":{...}}]}` |
-| `POST /api/v1/requests` | body `{"media_type":"movie|tv","media_id":<tmdb|tvdb>,"seasons":[1,2]|"all"}` → `201` com o request do Seerr |
+| `GET /api/v1/requests?take=50&skip=0&filter=all` | payload do Seerr **enriquecido**: `media` traz `title/name`, `posterPath` e `arr:{key,kind,id,profileId,profileName,status,progress,eta,error}` |
+| `POST /api/v1/requests` | body `{"media_type":"movie|tv","media_id":<tmdb|tvdb>,"seasons":[1,2]|"all","profile":"dublado|legendado"}` → `201`; `profileId` 8/9 (dublado) ou 7 (legendado) no Seerr |
+| `POST /api/v1/requests/hide` | body `{"key":"movie:tmdb:123"}` → arquiva no media-agent (`requests/hide`) |
+| `POST /api/v1/requests/profile` | body `{"kind":"movie|series","id":123,"profile":"legendado|dublado"}` → `/arr/switch` (legendado) ou `/arr/search` (dublado) |
 | `GET /api/v1/search?q=matrix&page=1&language=pt-BR` | `{"results":[{"id","mediaType","title|name","posterPath","overview","mediaInfo":{...}}]}` |
+| `GET /api/v1/discover?media_type=all&genre=action&year_min=2020&year_max=2024&min_rating=7&min_votes=1000&sort=popular&page=1&enrich=0` | `{"ok":true,"items":[...],"page":1,"total_pages":100}` |
 | `GET /api/v1/house` | ver abaixo |
+| `GET /api/v1/services` | `{"ok":true,"services":[{"id","name","ok","http_code","latency_ms","error"}]}` (cache 15 s) |
+| `GET /api/v1/pc` | `{"ok":true,"online":true,"status":"Online","checked_at":"..."}` |
+| `POST /api/v1/pc/wake` | magic packet pelo gaming-agent → `{"ok":true,"sent":true}` |
 | `GET /api/v1/subs/quota` | `{"level","allowed_downloads","downloads_count","remaining_downloads","reset_time","vip"}` |
+| `GET /api/v1/subs/queue` | `{"ok":true,"items":[{"id","kind","title","episode","episodeTitle","languages":["Portuguese (Brazil)"]}],"movies_total":0,"episodes_total":N}` |
 | `GET /api/v1/admin/downloads?status=1` | só admin/LAN: `{"ok":true,"items":[{"key","title","status","progress","eta","requested_by","error"}]}` |
+
+**Discover/descobrir:** o endpoint geral `/discover/{movies,tv}` **não** aceita `language`
+(retorna 0) nem `withGenres` (400). Para gênero use
+`/discover/{movies,tv}/genre/{id}` (só `page`/`language`); o BFF aplica nota/votos/ano em
+cima e devolve títulos em pt-BR. Padrão: 1+ ano, nota ≥ 7, ≥ 1000 votos, 20 itens/página.
+`enrich=1` (Home) adiciona `mediaInfo`/título; `enrich=0` (sub-tela) abre rápido.
+
+**Perfil do pedido:** `dublado` → perfil 8 (filme) / 9 (série); `legendado` → 7.
+Para anime os IDs diferem (10/9 e 10/8); hoje o BFF usa o mapa não-anime.
 
 `GET /api/v1/house` (real):
 
