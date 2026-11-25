@@ -138,6 +138,24 @@ class FakeSeerr(_Base):
             return self._send(200, {
                 "id": 1399, "name": "Serie", "posterPath": "/serie.jpg",
             })
+        if self.path.startswith("/api/v1/discover/movies"):
+            FakeSeerr.last_cookie = self.headers.get("Cookie")
+            if FakeSeerr.last_cookie != f"connect.sid={SEERR_COOKIE}":
+                return self._send(401, {"message": "não autenticado"})
+            return self._send(200, {"results": [
+                {"id": 603, "title": "Matrix", "posterPath": "/m.jpg",
+                 "backdropPath": "/mb.jpg", "overview": "...",
+                 "releaseDate": "1999-03-31", "voteAverage": 8.7, "mediaInfo": None},
+            ]})
+        if self.path.startswith("/api/v1/discover/tv"):
+            FakeSeerr.last_cookie = self.headers.get("Cookie")
+            if FakeSeerr.last_cookie != f"connect.sid={SEERR_COOKIE}":
+                return self._send(401, {"message": "não autenticado"})
+            return self._send(200, {"results": [
+                {"id": 1399, "name": "Serie", "posterPath": "/s.jpg",
+                 "backdropPath": "/sb.jpg", "firstAirDate": "2011-04-17",
+                 "voteAverage": 8.4, "mediaInfo": None},
+            ]})
         return self._send(404, {"message": "not found"})
 
 
@@ -479,6 +497,16 @@ class BffTest(unittest.TestCase):
         self.assertEqual(status, 200, data)
         self.assertEqual(data["results"][0]["title"], "Matrix")
         self.assertEqual(FakeSeerr.last_cookie, f"connect.sid={SEERR_COOKIE}")
+
+    def test_discover(self):
+        token, _ = self.login()
+        self.link(token)
+        status, data = http("GET", f"{self.public_url}/api/v1/discover", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(len(data["items"]), 2)
+        self.assertEqual(data["items"][0]["mediaType"], "movie")
+        self.assertEqual(data["items"][0]["title"], "Matrix")
+        self.assertEqual(data["items"][1]["mediaType"], "tv")
 
     def test_search_sem_termo(self):
         token, _ = self.login()

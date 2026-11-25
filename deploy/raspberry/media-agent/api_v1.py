@@ -35,6 +35,7 @@ Rotas públicas:
     POST /api/v1/requests/hide    {key}
     POST /api/v1/requests/profile {kind, id, profile: legendado|dublado}
     GET  /api/v1/search           ?q=&page=&language=
+    GET  /api/v1/discover
     GET  /api/v1/house
     GET  /api/v1/services
     GET  /api/v1/pc
@@ -66,7 +67,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from http.client import HTTPConnection, HTTPSConnection
 from http.cookies import SimpleCookie
@@ -694,6 +695,10 @@ def make_handler(services: Services, public: bool):
     arr_cache_lock = threading.Lock()
     arr_ttl = 15.0
 
+    # Recomendações do discover (famosas e não tão recentes), cache 10 min.
+    discover_cache: dict[str, tuple[float, dict]] = {}
+    discover_cache_lock = threading.Lock()
+
     class Handler(BaseHTTPRequestHandler):
         server_version = f"family-bff/{VERSION}"
         protocol_version = "HTTP/1.1"
@@ -834,6 +839,8 @@ def make_handler(services: Services, public: bool):
                 return self._change_profile()
             if path == "/api/v1/search" and method == "GET":
                 return self._search()
+            if path == "/api/v1/discover" and method == "GET":
+                return self._discover()
             if path == "/api/v1/house" and method == "GET":
                 return self._house()
             if path == "/api/v1/services" and method == "GET":
@@ -1086,6 +1093,61 @@ def make_handler(services: Services, public: bool):
                 f"/api/v1/search?query={quote(term)}&page={page}&language={quote(language)}",
             )
             self._send(200, self._seerr_result(status, text, data))
+
+        def _discover(self) -> None:
+            """Recomendações famosas e com pelo menos 1 ano (nota/votos altos)."""
+            identity = self._identity()
+            cookie = self._seerr_cookie(identity)
+            now = time.time()
+            with discover_cache_lock:
+                cached = discover_cache.get("data")
+                if cached and cached[0] > now:
+                    return self._send(200, cached[1])
+
+            limite = (
+                datetime.now(timezone.utc) - timedelta(days=365)
+            ).strftime("%Y-%m-%d")
+            itens = []
+            for kind, endpoint, date_param in (
+                ("movie", "/api/v1/discover/movies", "primaryReleaseDateLte"),
+                ("tv", "/api/v1/discover/tv", "firstAirDateLte"),
+            ):
+                path = (
+                    f"{endpoint}?sortBy=popularity.desc&voteAverageGte=7"
+                    f"&voteCountGte=1000&{date_param}={limite}"
+                    "&page=1&language=pt-BR"
+                )
+                status, text, data = services.seerr.call(cookie, "GET", path)
+                if status != 200 or not isinstance(data, dict):
+                    continue
+                for result in (data.get("results") or [])[:12]:
+                    if not isinstance(result, dict):
+                        continue
+                    itens.append({
+                        "id": result.get("id"),
+                        "mediaType": kind,
+                        "title": result.get("title") or result.get("name"),
+                        "posterPath": result.get("posterPath"),
+                        "backdropPath": result.get("backdropPath"),
+                        "overview": result.get("overview"),
+                        "releaseDate": result.get("releaseDate"),
+                        "firstAirDate": result.get("firstAirDate"),
+                        "voteAverage": result.get("voteAverage"),
+                        "mediaInfo": result.get("mediaInfo"),
+                    })
+
+            filmes = [item for item in itens if item["mediaType"] == "movie"]
+            series = [item for item in itens if item["mediaType"] == "tv"]
+            misto = []
+            for idx in range(max(len(filmes), len(series))):
+                if idx < len(filmes):
+                    misto.append(filmes[idx])
+                if idx < len(series):
+                    misto.append(series[idx])
+            payload = {"ok": True, "items": misto[:20]}
+            with discover_cache_lock:
+                discover_cache["data"] = (now + 600, payload)
+            self._send(200, payload)
 
         def _create_request(self) -> None:
             identity = self._identity()
