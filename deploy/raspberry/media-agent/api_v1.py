@@ -40,6 +40,7 @@ Rotas públicas:
     GET  /api/v1/pc
     POST /api/v1/pc/wake
     GET  /api/v1/subs/quota
+    GET  /api/v1/subs/queue
 
 Rotas de admin (só no listener --admin):
     GET  /api/v1/admin/ping
@@ -843,6 +844,8 @@ def make_handler(services: Services, public: bool):
                 return self._wake()
             if path == "/api/v1/subs/quota" and method == "GET":
                 return self._subs_quota()
+            if path == "/api/v1/subs/queue" and method == "GET":
+                return self._subs_queue()
             if path == "/api/v1/admin/ping" and method == "GET":
                 return self._admin_ping()
             if path == "/api/v1/admin/downloads" and method == "GET":
@@ -1288,6 +1291,55 @@ def make_handler(services: Services, public: bool):
                 "reset_time": quota.get("reset_time"),
                 "reset_time_utc": quota.get("reset_time_utc"),
                 "vip": bool(quota.get("vip")),
+            })
+
+        def _subs_queue(self) -> None:
+            self._identity()
+            try:
+                movies = services.media_agent.get(
+                    "/bazarr?path=/api/movies/wanted", timeout=15
+                )
+                episodes = services.media_agent.get(
+                    "/bazarr?path=/api/episodes/wanted", timeout=15
+                )
+            except ApiError as exc:
+                raise ApiError(503, "bazarr_unavailable", exc.message) from None
+            items = []
+            for movie in (movies.get("data") or [])[:20]:
+                if not isinstance(movie, dict):
+                    continue
+                items.append({
+                    "id": "movie:" + str(movie.get("radarrId") or movie.get("title") or ""),
+                    "kind": "movie",
+                    "title": movie.get("title") or "",
+                    "episode": None,
+                    "episodeTitle": movie.get("year"),
+                    "languages": [
+                        miss.get("name") or miss.get("code2")
+                        for miss in movie.get("missing_subtitles") or []
+                        if isinstance(miss, dict)
+                    ],
+                })
+            for ep in (episodes.get("data") or [])[:40]:
+                if not isinstance(ep, dict):
+                    continue
+                items.append({
+                    "id": "episode:" + str(ep.get("sonarrEpisodeId") or ""),
+                    "kind": "episode",
+                    "title": ep.get("seriesTitle") or "",
+                    "episode": ep.get("episode_number") or "",
+                    "episodeTitle": ep.get("episodeTitle") or "",
+                    "languages": [
+                        miss.get("name") or miss.get("code2")
+                        for miss in ep.get("missing_subtitles") or []
+                        if isinstance(miss, dict)
+                    ],
+                })
+            self._send(200, {
+                "ok": True,
+                "items": items,
+                "movies_total": movies.get("total") or 0,
+                "episodes_total": episodes.get("total") or 0,
             })
 
         def _require_admin(self):

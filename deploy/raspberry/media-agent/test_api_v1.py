@@ -203,6 +203,16 @@ class FakeMediaAgent(_Base):
                                             "error": "stalled", "failed": True},
                  "seerr": {"requestedBy": "teste"}},
             ]})
+        if self.path.startswith("/bazarr?"):
+            if "movies/wanted" in self.path:
+                return self._send(200, {"data": [], "total": 0})
+            if "episodes/wanted" in self.path:
+                return self._send(200, {"data": [
+                    {"seriesTitle": "Bleach", "episode_number": "17x41",
+                     "episodeTitle": "GOD", "sonarrEpisodeId": 601,
+                     "missing_subtitles": [{"name": "Portuguese (Brazil)", "code2": "pb"}]},
+                ], "total": 1})
+            return self._send(404, {"message": "not found"})
         return self._send(404, {"message": "not found"})
 
     def do_POST(self):
@@ -582,6 +592,16 @@ class BffTest(unittest.TestCase):
         status, data = http("GET", f"{self.public_url}/api/v1/pc")
         self.assertEqual(status, 401)
         self.assertEqual(data["code"], "unauthorized")
+
+    def test_subs_queue(self):
+        token, _ = self.login()
+        status, data = http("GET", f"{self.public_url}/api/v1/subs/queue", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(len(data["items"]), 1)
+        item = data["items"][0]
+        self.assertEqual(item["title"], "Bleach")
+        self.assertEqual(item["episode"], "17x41")
+        self.assertIn("Portuguese (Brazil)", item["languages"])
 
     def test_media_agent_fora(self):
         cfg = api_v1.Config(
