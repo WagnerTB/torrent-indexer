@@ -1,4 +1,4 @@
-export const GAMING = 'http://192.168.1.10:8099';
+export const GAMING = 'http://192.168.1.10:8100';
 const LOCAL_HOSTS = ['192.168.1.10', 'localhost', '127.0.0.1'];
 export const REMOTE = !LOCAL_HOSTS.includes(location.hostname);
 export const SERVICE_HOST = REMOTE ? location.hostname : '192.168.1.10';
