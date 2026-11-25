@@ -375,6 +375,8 @@ O que está pronto:
 
 O que falta para entrar no ar: copiar os dois arquivos para `${CONFIG_ROOT}/media-agent`, adicionar o serviço `media-bff` no compose e apontar o `cloudflared` para `127.0.0.1:8099` (etapa 1b).
 
+> **Redeploy:** `MEDIA_STACK.md` §Comandos úteis → **Redeploy do BFF (`media-bff`)**. Só código: `cp` do `api_v1.py` + `docker compose restart media-bff`; compose mudou: `up -d media-bff`; imagem mudou: `build media-agent` + `--force-recreate`.
+
 **Status: rodando em produção** (container `media-bff`, volume Docker `media-bff-state`). Verificado no Pi: `/api/v1/status` → `200` em `127.0.0.1:8099`; admin → `401` em `<LAN_IP>:8092`; admin → `404` no listener público.
 
 > **Armadilha do NTFS:** `<CONFIG_ROOT>` é `fuseblk` (NTFS) e **ignora chmod** — todo arquivo aparece `775`, mesmo pedindo `600`. Por isso o estado do BFF (chaves + sessões cifradas) foi para o volume Docker `media-bff-state`, em ext4, onde `0600` funciona de verdade.

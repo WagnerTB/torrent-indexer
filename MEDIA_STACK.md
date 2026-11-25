@@ -878,7 +878,46 @@ curl -s -H "X-API-KEY: <BAZARR_API_KEY>" \
   http://<LAN_IP>:6767/api/system/status
 ```
 
+### Redeploy do BFF (`media-bff`)
+
+O diretório `<CONFIG_ROOT>/media-agent` é montado como `/app` (read-only) no container, e o compose real fica em `<STACK_ROOT>`. `<REPO_ROOT>` é o clone deste repositório no Pi. Dependendo do que mudou:
+
+```bash
+# 1) Só código (api_v1.py): restart reimporta o arquivo, sem recriar o container
+cp <REPO_ROOT>/deploy/raspberry/media-agent/api_v1.py \
+   <CONFIG_ROOT>/media-agent/api_v1.py
+cd <STACK_ROOT>
+docker compose restart media-bff
+docker compose ps media-bff
+
+# 2) Mudou o compose (env, portas, volumes): recria
+cd <STACK_ROOT>
+docker compose up -d media-bff
+# se quiser forçar: docker compose up -d --force-recreate media-bff
+
+# 3) Mudou a imagem (Dockerfile, media_agent.py, dependências): o media-bff
+#    usa a mesma imagem `media-agent:local`
+cd <STACK_ROOT>
+docker compose build media-agent
+docker compose up -d --force-recreate media-agent media-bff
+
+# 4) Validar
+curl -s http://<LAN_IP>:8091/api/v1/status
+python3 <REPO_ROOT>/deploy/raspberry/media-agent/check_public.py http://<LAN_IP>:8091
+docker logs --tail 30 media-media-bff-1
+```
+
+- O estado (chaves e sessões do Seerr) fica no volume `media-bff-state`: `restart` e `up -d` preservam. Só `docker compose down -v` apaga (todos precisariam vincular o Seerr de novo).
+- `test_api_v1.py` roda no repo (`python3 -m unittest test_api_v1`), não no container.
+- Rollback: `git show <commit>:deploy/raspberry/media-agent/api_v1.py > <CONFIG_ROOT>/media-agent/api_v1.py` e `docker compose restart media-bff`.
+
 ## 17. Histórico das implementações
+
+### 2026-11-25
+
+- BFF do app da família (`media-bff`): 38 testes, 3 listeners (8099 público preso a `127.0.0.1`, 8091 na LAN, 8092 admin), sessão do Seerr por pessoa com cookie cifrado no volume `media-bff-state`.
+- `gaming-agent` passou de 8099 para 8100 (LAN); `8098` público inalterado.
+- Jellyfin remoto via Tailscale Funnel; BFF público via Cloudflare Tunnel.
 
 ### 2026-11-02
 
