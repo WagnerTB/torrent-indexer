@@ -197,12 +197,20 @@ class FakeMediaAgent(_Base):
             }})
         if self.path.startswith("/arr/pending"):
             return self._send(200, {"ok": True, "seerrError": "", "items": [
-                {"key": "movie:tmdb:1", "kind": "movie", "title": "Filme", "year": 2020,
-                 "status": "error", "profileName": "Legendado",
+                {"key": "movie:tmdb:1", "kind": "movie", "id": 1, "title": "Filme", "year": 2020,
+                 "tmdbId": 603, "status": "error", "profileId": 7, "profileName": "Legendado",
                  "lastError": "", "queue": {"progress": 79, "timeleft": "108.13:20:52",
                                             "error": "stalled", "failed": True},
                  "seerr": {"requestedBy": "teste"}},
             ]})
+        return self._send(404, {"message": "not found"})
+
+    def do_POST(self):
+        body = self._body()
+        if self.path == "/requests/hide":
+            return self._send(200, {"ok": True, "updated": 1, "hidden": True})
+        if self.path in ("/arr/search", "/arr/switch"):
+            return self._send(200, {"ok": True, "profile": 9})
         return self._send(404, {"message": "not found"})
 
 
@@ -396,6 +404,35 @@ class BffTest(unittest.TestCase):
         media = data["results"][0]["media"]
         self.assertEqual(media["title"], "Matrix")
         self.assertEqual(media["posterPath"], "/matrix.jpg")
+
+    def test_pedidos_traz_status_da_arr(self):
+        token, _ = self.login()
+        self.link(token)
+        status, data = http("GET", f"{self.public_url}/api/v1/requests", token=token)
+        self.assertEqual(status, 200, data)
+        arr = data["results"][0]["media"]["arr"]
+        self.assertEqual(arr["key"], "movie:tmdb:1")
+        self.assertEqual(arr["status"], "error")
+        self.assertEqual(arr["progress"], 79)
+        self.assertEqual(arr["id"], 1)
+
+    def test_esconder_pedido(self):
+        token, _ = self.login()
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests/hide",
+            {"key": "movie:tmdb:1"}, token=token,
+        )
+        self.assertEqual(status, 200, data)
+        self.assertTrue(data["ok"])
+
+    def test_trocar_perfil(self):
+        token, _ = self.login()
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests/profile",
+            {"kind": "series", "id": 1399, "profile": "legendado"}, token=token,
+        )
+        self.assertEqual(status, 200, data)
+        self.assertTrue(data["ok"])
 
     def test_pedidos_sem_vincular(self):
         token, _ = self.login()

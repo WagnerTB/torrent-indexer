@@ -32,6 +32,8 @@ Rotas públicas:
     GET  /api/v1/me
     GET  /api/v1/requests
     POST /api/v1/requests         {media_type, media_id, seasons?}
+    POST /api/v1/requests/hide    {key}
+    POST /api/v1/requests/profile {kind, id, profile: legendado|dublado}
     GET  /api/v1/search           ?q=&page=&language=
     GET  /api/v1/house
     GET  /api/v1/services
@@ -411,6 +413,21 @@ class MediaAgentClient:
             )
         return data
 
+    def post(self, path: str, body=None, timeout: float | None = None):
+        try:
+            status, _, text, data = self.http.json(
+                "POST", path, body=body, timeout=timeout
+            )
+        except OSError as exc:
+            raise ApiError(
+                503, "media_agent_unavailable", f"media-agent inacessível: {exc}"
+            ) from None
+        if status != 200 or data is None:
+            raise ApiError(
+                503, "media_agent_unavailable", f"media-agent respondeu {status}"
+            )
+        return data
+
 
 class RateLimiter:
     """Janela deslizante simples, por chave (IP + bucket)."""
@@ -671,6 +688,11 @@ def make_handler(services: Services, public: bool):
     services_cache_lock = threading.Lock()
     services_ttl = 15.0
 
+    # Fila do *arr (progresso/status) por tmdbId/tvdbId, com cache curto.
+    arr_cache: dict[str, tuple[float, tuple[dict, dict]]] = {}
+    arr_cache_lock = threading.Lock()
+    arr_ttl = 15.0
+
     class Handler(BaseHTTPRequestHandler):
         server_version = f"family-bff/{VERSION}"
         protocol_version = "HTTP/1.1"
@@ -805,6 +827,10 @@ def make_handler(services: Services, public: bool):
                 return self._list_requests()
             if path == "/api/v1/requests" and method == "POST":
                 return self._create_request()
+            if path == "/api/v1/requests/hide" and method == "POST":
+                return self._hide_request()
+            if path == "/api/v1/requests/profile" and method == "POST":
+                return self._change_profile()
             if path == "/api/v1/search" and method == "GET":
                 return self._search()
             if path == "/api/v1/house" and method == "GET":
@@ -932,13 +958,43 @@ def make_handler(services: Services, public: bool):
                 meta_cache[key] = (now + meta_ttl, meta)
             return meta
 
+        def _arr_pending_maps(self):
+            """Mapa tmdbId/tvdbId -> item do *arr (com progresso), cache 15 s."""
+            now = time.time()
+            with arr_cache_lock:
+                cached = arr_cache.get("data")
+                if cached and cached[0] > now:
+                    return cached[1]
+            try:
+                data = services.media_agent.get("/arr/pending?status=1", timeout=8)
+            except ApiError:
+                return {}, {}
+            movies, series = {}, {}
+            for item in data.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("kind") == "movie" and item.get("tmdbId") is not None:
+                    try:
+                        movies[int(item["tmdbId"])] = item
+                    except (TypeError, ValueError):
+                        pass
+                elif item.get("kind") == "series" and item.get("tvdbId") is not None:
+                    try:
+                        series[int(item["tvdbId"])] = item
+                    except (TypeError, ValueError):
+                        pass
+            with arr_cache_lock:
+                arr_cache["data"] = (now + arr_ttl, (movies, series))
+            return movies, series
+
         def _enrich_requests(self, cookie: str, data):
-            """Preenche title/name/posterPath que o /request não devolve."""
+            """Adiciona pôster/título (Seerr) e status/progresso (*arr)."""
             if not isinstance(data, dict):
                 return data
             results = data.get("results")
             if not isinstance(results, list):
                 return data
+            movies, series = self._arr_pending_maps()
             for pedido in results:
                 if not isinstance(pedido, dict):
                     continue
@@ -946,23 +1002,52 @@ def make_handler(services: Services, public: bool):
                 if not isinstance(media, dict):
                     continue
                 media_type = media.get("mediaType")
+
+                # 1) Título/pôster (o payload de /request não traz pôster).
+                tmdb_id = None
                 try:
                     tmdb_id = int(media.get("tmdbId"))
                 except (TypeError, ValueError):
-                    continue
-                if media_type not in ("movie", "tv"):
-                    continue
-                ja_tem_titulo = bool(media.get("title") or media.get("name"))
-                if ja_tem_titulo and media.get("posterPath"):
-                    continue
-                meta = self._seerr_metadata(cookie, media_type, tmdb_id)
-                if not meta:
-                    continue
-                if media_type == "movie":
-                    media["title"] = media.get("title") or meta.get("title")
-                else:
-                    media["name"] = media.get("name") or meta.get("name")
-                media["posterPath"] = media.get("posterPath") or meta.get("posterPath")
+                    pass
+                if media_type in ("movie", "tv") and tmdb_id is not None:
+                    ja_tem_titulo = bool(media.get("title") or media.get("name"))
+                    if not (ja_tem_titulo and media.get("posterPath")):
+                        meta = self._seerr_metadata(cookie, media_type, tmdb_id)
+                        if meta:
+                            if media_type == "movie":
+                                media["title"] = media.get("title") or meta.get("title")
+                            else:
+                                media["name"] = media.get("name") or meta.get("name")
+                            media["posterPath"] = (
+                                media.get("posterPath") or meta.get("posterPath")
+                            )
+
+                # 2) Status/progresso da fila do *arr.
+                arr_item = None
+                try:
+                    if media_type == "movie" and media.get("tmdbId") is not None:
+                        arr_item = movies.get(int(media["tmdbId"]))
+                    elif media_type == "tv" and media.get("tvdbId") is not None:
+                        arr_item = series.get(int(media["tvdbId"]))
+                except (TypeError, ValueError):
+                    arr_item = None
+                if arr_item:
+                    queue = arr_item.get("queue") or {}
+                    media["arr"] = {
+                        "key": arr_item.get("key"),
+                        "kind": arr_item.get("kind"),
+                        "id": arr_item.get("id"),
+                        "profileId": arr_item.get("profileId"),
+                        "profileName": arr_item.get("profileName"),
+                        "status": arr_item.get("status"),
+                        "progress": queue.get("progress"),
+                        "eta": queue.get("timeleft"),
+                        "error": (
+                            arr_item.get("errorMessage")
+                            or arr_item.get("lastError")
+                            or ""
+                        ),
+                    }
             return data
 
         def _list_requests(self) -> None:
@@ -1031,6 +1116,43 @@ def make_handler(services: Services, public: bool):
                 raise ApiError(409, "already_requested", "pedido já existente")
             self._seerr_result(status, text, data)
             raise ApiError(502, "seerr_unavailable", f"Seerr respondeu {status}")
+
+        def _hide_request(self) -> None:
+            self._identity()
+            body = self._body()
+            key = str(body.get("key") or "").strip()
+            if not key:
+                raise ApiError(400, "key_required", "informe key")
+            data = services.media_agent.post(
+                "/requests/hide", {"keys": [key], "hidden": True}, timeout=10
+            )
+            self._send(200, {"ok": bool(data.get("ok")), "updated": data.get("updated")})
+
+        def _change_profile(self) -> None:
+            self._identity()
+            body = self._body()
+            kind = str(body.get("kind") or "").strip().lower()
+            try:
+                item_id = int(body.get("id"))
+            except (TypeError, ValueError):
+                raise ApiError(400, "invalid_item", "informe kind e id") from None
+            if kind not in ("movie", "series"):
+                raise ApiError(400, "invalid_item", "use kind movie ou series")
+            profile = str(body.get("profile") or "").strip().lower()
+            if profile == "legendado":
+                data = services.media_agent.post(
+                    "/arr/switch", {"kind": kind, "id": item_id}, timeout=30
+                )
+            elif profile == "dublado":
+                target = 8 if kind == "movie" else 9
+                data = services.media_agent.post(
+                    "/arr/search",
+                    {"kind": kind, "id": item_id, "profile": target},
+                    timeout=30,
+                )
+            else:
+                raise ApiError(400, "invalid_profile", "use legendado ou dublado")
+            self._send(200, {"ok": bool(data.get("ok")), "profile": data.get("profile")})
 
         def _house(self) -> None:
             self._identity()
