@@ -1309,6 +1309,15 @@ def make_handler(services: Services, public: bool):
                     except (TypeError, ValueError):
                         raise ApiError(400, "invalid_seasons", "seasons inválido") from None
 
+            # Perfil alvo (dublado/legendado). IDs do *arr usados pela casa;
+            # para anime os IDs diferem (10/9 no filme e 10/8 na série).
+            profile = str(body.get("profile") or "").strip().lower()
+            if profile in ("dublado", "legendado"):
+                if media_type == "movie":
+                    payload["profileId"] = 8 if profile == "dublado" else 7
+                else:
+                    payload["profileId"] = 9 if profile == "dublado" else 7
+
             status, text, data = services.seerr.call(
                 cookie, "POST", "/api/v1/request", body=payload
             )

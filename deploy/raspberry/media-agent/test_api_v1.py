@@ -488,6 +488,17 @@ class BffTest(unittest.TestCase):
         self.assertEqual(data["echo"]["seasons"], [1, 2])
         self.assertEqual(data["echo"]["mediaType"], "tv")
 
+    def test_criar_pedido_com_perfil(self):
+        token, _ = self.login()
+        self.link(token)
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests",
+            {"media_type": "movie", "media_id": 603, "profile": "dublado"},
+            token=token,
+        )
+        self.assertEqual(status, 201, data)
+        self.assertEqual(data["echo"]["profileId"], 8)
+
     def test_search(self):
         token, _ = self.login()
         self.link(token)
