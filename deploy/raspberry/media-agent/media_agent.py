@@ -2,6 +2,7 @@
 import ipaddress
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -64,6 +65,21 @@ SEERR_TIMEOUT = int(os.getenv("SEERR_TIMEOUT_SECONDS", "15"))
 STATE_DIR = os.getenv("STATE_DIR", "/state")
 STATE_DB = os.path.join(STATE_DIR, "requests.db")
 STORAGE_CONFIG = os.getenv("STORAGE_CONFIG", "").strip()
+
+# --- Packs por temporada (Fase 1) -----------------------------------------
+PACK_WORKER_ENABLED = os.getenv("PACK_WORKER_ENABLED", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+PACK_WORKER_DRY_RUN = os.getenv("PACK_WORKER_DRY_RUN", "0").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+PACK_CONCURRENCY = max(1, int(os.getenv("SEASON_SEARCH_CONCURRENCY", "2")))
+PACK_MAX_ATTEMPTS = max(1, int(os.getenv("PACK_MAX_ATTEMPTS", "3")))
+PACK_RETRY_HOURS = max(0.1, float(os.getenv("PACK_RETRY_HOURS", "6")))
+PACK_POLL_SECONDS = max(10, int(os.getenv("PACK_WORKER_POLL_SECONDS", "60")))
+PACK_RELEASE_CACHE_SECONDS = max(60, int(os.getenv("PACK_RELEASE_CACHE_SECONDS", "1800")))
+PACK_GRAB_GRACE_SECONDS = max(60, int(os.getenv("PACK_GRAB_GRACE_SECONDS", "900")))
+
 
 _os_token = None
 _os_token_ts = 0.0
@@ -486,6 +502,92 @@ def _db_init():
                 CREATE INDEX IF NOT EXISTS idx_requests_series ON requests(series_id);
                 CREATE INDEX IF NOT EXISTS idx_requests_kind ON requests(kind);
                 CREATE INDEX IF NOT EXISTS idx_events_key ON events(key, at);
+
+                CREATE TABLE IF NOT EXISTS pack_jobs (
+                    key TEXT PRIMARY KEY,
+                    tvdb_id INTEGER NOT NULL,
+                    series_id INTEGER,
+                    season INTEGER NOT NULL,
+                    profile_id INTEGER,
+                    profile_name TEXT,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    max_attempts INTEGER NOT NULL DEFAULT 3,
+                    next_attempt_at TEXT,
+                    last_attempt_at TEXT,
+                    last_checked_at TEXT,
+                    queue_pos INTEGER,
+                    release_guid TEXT,
+                    release_indexer_id INTEGER,
+                    release_title TEXT,
+                    release_size INTEGER,
+                    release_seeders INTEGER,
+                    release_quality TEXT,
+                    aired INTEGER,
+                    files INTEGER,
+                    missing INTEGER,
+                    audio_status TEXT,
+                    error TEXT,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    hidden_at TEXT,
+                    meta TEXT
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_jobs_tvdb_season
+                    ON pack_jobs(tvdb_id, season);
+                CREATE INDEX IF NOT EXISTS idx_pack_jobs_status ON pack_jobs(status);
+                CREATE INDEX IF NOT EXISTS idx_pack_jobs_next ON pack_jobs(next_attempt_at);
+
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    key TEXT,
+                    tvdb_id INTEGER,
+                    series_id INTEGER,
+                    season INTEGER,
+                    title TEXT,
+                    message TEXT,
+                    action TEXT,
+                    payload TEXT,
+                    created_at TEXT NOT NULL,
+                    read_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
+                CREATE INDEX IF NOT EXISTS idx_notifications_key ON notifications(kind, key);
+
+                CREATE TABLE IF NOT EXISTS notification_reads (
+                    notification_id INTEGER NOT NULL,
+                    user_id TEXT NOT NULL,
+                    read_at TEXT NOT NULL,
+                    PRIMARY KEY (notification_id, user_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_notification_reads_user
+                    ON notification_reads(user_id, read_at);
+
+                CREATE TABLE IF NOT EXISTS devices (
+                    user_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    fcm_token TEXT NOT NULL,
+                    platform TEXT,
+                    updated_at TEXT NOT NULL,
+                    last_seen_at TEXT,
+                    PRIMARY KEY (user_id, device_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS notification_pushes (
+                    notification_id INTEGER NOT NULL,
+                    user_id TEXT NOT NULL,
+                    sent_at TEXT NOT NULL,
+                    error TEXT,
+                    PRIMARY KEY (notification_id, user_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS pack_worker_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TEXT
+                );
                 """
             )
             conn.commit()
@@ -2330,6 +2432,1523 @@ def migration_status():
             continue
     return {"phase": "idle", "percent": None}
 
+# ---------------------------------------------------------------------------
+# Packs por temporada (Fase 1)
+#
+# Regras fechadas (PLANO_PACKS_TEMPORADA.md):
+#   - só pack completo (fullSeason), nunca busca de episódio solto;
+#   - aceito = !rejected && downloadAllowed && temporada correta && sem multi-temporada;
+#   - ranking: seeders desc, qualidade desc, tamanho desc;
+#   - fila com concorrência 2, 3 tentativas com intervalo de 6 h;
+#   - temporada no ar: desmonitorar e aguardar o finale;
+#   - exceção 7/8: fechar com 1 episódio solto (manual, via endpoint).
+# ---------------------------------------------------------------------------
+
+PACK_STATUSES = (
+    "queued", "waiting_finale", "searching", "pack_found", "downloading",
+    "importing", "complete", "incomplete", "no_pack", "failed", "ignored",
+)
+PACK_ACTIVE_STATUSES = ("pack_found", "downloading", "importing")
+
+PACK_STATUS_LABELS = {
+    "queued": "Na fila para procura",
+    "waiting_finale": "Aguardando finalização da exibição",
+    "searching": "Procurando pack",
+    "pack_found": "Pack encontrado",
+    "downloading": "Baixando",
+    "importing": "Importando",
+    "complete": "Completa",
+    "incomplete": "Incompleta",
+    "no_pack": "Sem pack completo",
+    "failed": "Falhou",
+    "ignored": "Ignorado",
+}
+
+PACK_JOB_FIELDS = (
+    "tvdb_id", "series_id", "season", "profile_id", "profile_name", "status",
+    "attempts", "max_attempts", "next_attempt_at", "last_attempt_at",
+    "last_checked_at", "queue_pos", "release_guid", "release_indexer_id",
+    "release_title", "release_size", "release_seeders", "release_quality",
+    "aired", "files", "missing", "audio_status", "error", "hidden_at", "meta",
+)
+
+# Packs que cobrem mais de uma temporada (S01-S09, S01 S08, Complete Series...).
+PACK_MULTI_SEASON_RE = re.compile(
+    r"(\bS\d{1,2}\s*[-\u2013\u2014]\s*S\d{1,2}\b"
+    r"|\bS\d{1,2}\s+S\d{1,2}\b"
+    r"|\bSEASON\s*\d{1,2}\s*[-\u2013\u2014]\s*\d{1,2}\b"
+    r"|\bTEMPORADAS?\s*\d{1,2}\s*[-\u2013\u2014]\s*\d{1,2}\b"
+    r"|\bCOMPLETE\s+SERIES\b"
+    r"|COMPLETA\s+S[E\u00c9]RIE)",
+    re.I,
+)
+
+_pack_state = {
+    "started_at": None,
+    "last_tick_at": None,
+    "last_error": "",
+    "thread": None,
+}
+_pack_running = {}
+_pack_executor = None
+_pack_lock = threading.Lock()
+_pack_episode_cache = {}
+_pack_release_cache = {}
+
+
+def _parse_iso(value):
+    if not value:
+        return None
+    try:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso_in(seconds):
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+
+
+def _pack_key(tvdb_id, season):
+    return f"tvdb:{int(tvdb_id)}:s{int(season)}"
+
+
+def _pack_job_from_row(row):
+    job = {name: row[name] for name in row.keys()}
+    job["meta"] = _json_load(job.get("meta")) if job.get("meta") else {}
+    return job
+
+
+def _pack_job_get(key):
+    row = _db_one("SELECT * FROM pack_jobs WHERE key = ?", (key,))
+    return _pack_job_from_row(row) if row else None
+
+
+def _pack_job_upsert(record):
+    key = str(record.get("key") or "").strip()
+    if not key:
+        return None
+    values = {}
+    for field in PACK_JOB_FIELDS:
+        if field in record:
+            value = record[field]
+            if field == "meta" and isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False)
+            values[field] = value
+    now = _now_iso()
+    with _db_lock:
+        conn = _db_connect()
+        try:
+            row = conn.execute("SELECT * FROM pack_jobs WHERE key = ?", (key,)).fetchone()
+            if row is None:
+                values.setdefault("status", "queued")
+                values.setdefault("attempts", 0)
+                values.setdefault("max_attempts", PACK_MAX_ATTEMPTS)
+                values.setdefault("created_at", now)
+                values["key"] = key
+                values["updated_at"] = now
+                cols = ",".join(values.keys())
+                marks = ",".join("?" for _ in values)
+                conn.execute(
+                    f"INSERT INTO pack_jobs ({cols}) VALUES ({marks})",
+                    list(values.values()),
+                )
+            else:
+                updates = {name: value for name, value in values.items() if row[name] != value}
+                if updates:
+                    updates["updated_at"] = now
+                    sets = ",".join(f"{name}=?" for name in updates)
+                    conn.execute(
+                        f"UPDATE pack_jobs SET {sets} WHERE key = ?",
+                        list(updates.values()) + [key],
+                    )
+            conn.commit()
+        finally:
+            conn.close()
+    return _pack_job_get(key)
+
+
+def _pack_job_update(key, meta_patch=None, **fields):
+    job = _pack_job_get(key)
+    if not job:
+        return None
+    record = {"key": key, **fields}
+    if meta_patch is not None:
+        meta = dict(job.get("meta") or {})
+        meta.update(meta_patch)
+        record["meta"] = meta
+    return _pack_job_upsert(record)
+
+
+def _pack_state_get(key, default=None):
+    row = _db_one("SELECT value FROM pack_worker_state WHERE key = ?", (key,))
+    return row["value"] if row else default
+
+
+def _pack_state_set(key, value):
+    with _db_lock:
+        conn = _db_connect()
+        try:
+            conn.execute(
+                "INSERT INTO pack_worker_state (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (key, str(value), _now_iso()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _pack_quality_size_cap_gb(name):
+    """Teto grosseiro de GB por episódio (guarda contra mapeamento quebrado)."""
+    quality = (name or "").lower()
+    if "2160" in quality or "4k" in quality:
+        return 15.0
+    if "1080" in quality:
+        return 4.0
+    if "720" in quality:
+        return 2.0
+    return 1.0
+
+
+def pack_evaluate_release(release, season, tvdb_id=None, expected_episodes=None):
+    """Motivos para recusar um release como pack da temporada (vazio = aceito)."""
+    reasons = []
+    release = release or {}
+    if not release.get("fullSeason"):
+        reasons.append("nao_e_pack_temporada")
+    if release.get("rejected"):
+        reasons.append("rejeitado_sonarr")
+    if release.get("downloadAllowed") is False:
+        reasons.append("download_nao_permitido")
+    mapped = _as_int(release.get("mappedSeasonNumber"))
+    if mapped is not None and mapped != _as_int(season):
+        reasons.append(f"temporada_incorreta:{mapped}")
+    if PACK_MULTI_SEASON_RE.search(str(release.get("title") or "")):
+        reasons.append("multi_temporada")
+    release_tvdb = _as_int(release.get("tvdbId"))
+    if tvdb_id and release_tvdb and release_tvdb != _as_int(tvdb_id):
+        reasons.append("tvdb_divergente")
+    if expected_episodes:
+        size = _as_float(release.get("size"))
+        per_episode = size / 1e9 / int(expected_episodes)
+        quality = ((release.get("quality") or {}).get("quality") or {}).get("name")
+        cap = _pack_quality_size_cap_gb(quality)
+        if per_episode > cap:
+            reasons.append(f"tamanho_por_episodio:{per_episode:.2f}>{cap:g}")
+    return reasons
+
+
+def pack_rank_releases(releases):
+    return sorted(
+        releases or [],
+        key=lambda item: (
+            -_as_float(item.get("seeders")),
+            -_as_float(item.get("qualityWeight")),
+            -_as_float(item.get("size")),
+        ),
+    )
+
+
+def pack_filter_releases(releases, season, tvdb_id=None, expected_episodes=None):
+    """(aceitos ranqueados, recusados com motivo)."""
+    accepted = []
+    skipped = []
+    for release in releases or []:
+        reasons = pack_evaluate_release(release, season, tvdb_id, expected_episodes)
+        if reasons:
+            skipped.append({
+                "title": release.get("title") or "",
+                "seeders": _as_int(release.get("seeders")),
+                "size": _as_int(release.get("size")),
+                "reasons": reasons,
+            })
+        else:
+            accepted.append(release)
+    return pack_rank_releases(accepted), skipped
+
+
+def _pack_episode_aired(episode, now=None):
+    now = now or datetime.now(timezone.utc)
+    parsed = _parse_iso(episode.get("airDateUtc") or episode.get("airDate"))
+    if parsed is None:
+        return True
+    return parsed <= now
+
+
+def pack_episode_stats(episodes, season, now=None):
+    season = _as_int(season)
+    season_episodes = [
+        episode for episode in (episodes or [])
+        if _as_int(episode.get("seasonNumber")) == season
+    ]
+    aired = [episode for episode in season_episodes if _pack_episode_aired(episode, now)]
+    future = [episode for episode in season_episodes if not _pack_episode_aired(episode, now)]
+    files = [episode for episode in aired if episode.get("hasFile")]
+    dates = [
+        episode.get("airDateUtc") or episode.get("airDate") or ""
+        for episode in season_episodes
+    ]
+    dates = [value for value in dates if value]
+    return {
+        "episodeCount": len(season_episodes),
+        "aired": len(aired),
+        "files": len(files),
+        "missing": max(0, len(aired) - len(files)),
+        "future": len(future),
+        "monitored": sum(1 for episode in season_episodes if episode.get("monitored")),
+        "lastAirDate": max((episode.get("airDateUtc") or episode.get("airDate") or "" for episode in aired), default=""),
+        "finalAirDate": max(dates, default=""),
+        "nextAirDate": min(dates, default=""),
+    }
+
+
+def _pack_series_episodes(series_id, refresh=False):
+    series_id = _as_int(series_id)
+    if not series_id:
+        return []
+    now = time.time()
+    cached = _pack_episode_cache.get(series_id)
+    if cached and not refresh and now - cached[0] < 30:
+        return cached[1]
+    key = arr_key(SONARR_CONFIG)
+    if not key:
+        return []
+    raw = arr_request(
+        SONARR_URL, key, f"/api/v3/episode?seriesId={series_id}&includeEpisodeFile=true"
+    ) or []
+    episodes = []
+    for episode in raw:
+        episodes.append({
+            "id": _as_int(episode.get("id")),
+            "seasonNumber": _as_int(episode.get("seasonNumber")) or 0,
+            "episodeNumber": _as_int(episode.get("episodeNumber")) or 0,
+            "absoluteEpisodeNumber": _as_int(episode.get("absoluteEpisodeNumber")),
+            "title": episode.get("title") or "",
+            "airDateUtc": episode.get("airDateUtc") or "",
+            "airDate": episode.get("airDate") or "",
+            "monitored": bool(episode.get("monitored")),
+            "hasFile": bool(episode.get("hasFile")),
+        })
+    _pack_episode_cache[series_id] = (now, episodes)
+    return episodes
+
+
+def _pack_series_by_tvdb(tvdb_id, refresh=False):
+    tvdb_id = _as_int(tvdb_id)
+    if not tvdb_id:
+        return None
+    for series in _sonarr_series(refresh=refresh):
+        if _as_int(series.get("tvdbId")) == tvdb_id:
+            return series
+    return None
+
+
+def _pack_set_season_flag(series_id, season, monitored):
+    """Atualiza `seasons[].monitored` na série (o Sonarr não faz isso por episódio)."""
+    series_id = _as_int(series_id)
+    season = _as_int(season)
+    if not series_id or season is None:
+        return False
+    key = arr_key(SONARR_CONFIG)
+    if not key:
+        return False
+    series = arr_request(SONARR_URL, key, f"/api/v3/series/{series_id}") or {}
+    changed = False
+    for row in series.get("seasons") or []:
+        if _as_int(row.get("seasonNumber")) == season and bool(row.get("monitored")) != monitored:
+            row["monitored"] = monitored
+            changed = True
+    if changed:
+        arr_request(SONARR_URL, key, f"/api/v3/series/{series_id}", "PUT", series)
+        _sonarr_series_cache.update({"ts": 0.0, "series": []})
+    return changed
+
+
+def _pack_monitored_seasons():
+    """Temporadas monitoradas de fato (flag da temporada ou episódio monitorado)."""
+    try:
+        series_list = _sonarr_series(refresh=True)
+    except Exception:
+        return []
+    found = {}
+    for series in series_list:
+        series_id = _as_int(series.get("id"))
+        if not series_id:
+            continue
+        flagged = []
+        for row in series.get("seasons") or []:
+            season = _as_int(row.get("seasonNumber"))
+            if season is None or season <= 0 or not row.get("monitored"):
+                continue
+            flagged.append(season)
+            found[(series_id, season)] = series
+        if series.get("monitored") and not flagged:
+            # Seerr pode monitorar episódios sem marcar a temporada.
+            try:
+                episodes = _pack_series_episodes(series_id)
+            except Exception:
+                continue
+            seasons = {
+                _as_int(episode.get("seasonNumber")) for episode in episodes
+                if episode.get("monitored")
+            }
+            for season in seasons:
+                if season and season > 0:
+                    found[(series_id, season)] = series
+    return [
+        {"series": series, "season": season}
+        for (series_id, season), series in found.items()
+    ]
+
+
+def _pack_fetch_releases(series_id, season, refresh=False):
+    cache_key = (_as_int(series_id), _as_int(season))
+    now = time.time()
+    cached = _pack_release_cache.get(cache_key)
+    if cached and not refresh and now - cached[0] < PACK_RELEASE_CACHE_SECONDS:
+        return cached[1]
+    key = arr_key(SONARR_CONFIG)
+    if not key:
+        raise RuntimeError("API key do Sonarr não encontrada")
+    raw = arr_request(
+        SONARR_URL,
+        key,
+        f"/api/v3/release?seriesId={cache_key[0]}&seasonNumber={cache_key[1]}",
+        timeout=180,
+    ) or []
+    _pack_release_cache[cache_key] = (now, raw)
+    return raw
+
+
+def _pack_queue_map():
+    key = arr_key(SONARR_CONFIG)
+    if not key:
+        return {}
+    payload = _safe_arr_request(
+        SONARR_URL, key,
+        "/api/v3/queue?page=1&pageSize=250&includeUnknownSeriesItems=true",
+        20, {},
+    ) or {}
+    result = {}
+    for record in payload.get("records") or []:
+        if record.get("title"):
+            result[str(record["title"])] = record
+        if record.get("downloadId"):
+            result[str(record["downloadId"])] = record
+    return result
+
+
+def _pack_queue_progress(record):
+    size = _as_float(record.get("size"))
+    left = _as_float(record.get("sizeleft"))
+    if size <= 0:
+        return 0
+    return max(0, min(100, round(((size - left) / size) * 100)))
+
+
+def _pack_status_label(job):
+    status = job.get("status") or "queued"
+    label = PACK_STATUS_LABELS.get(status, status)
+    meta = job.get("meta") or {}
+    if status == "downloading" and meta.get("progress") is not None:
+        return f"{label} {meta['progress']}%"
+    if status in ("importing", "complete", "incomplete"):
+        return f"{label} {job.get('files') or 0}/{job.get('aired') or 0}"
+    return label
+
+
+def _pack_job_public(job, queue_pos=None):
+    meta = job.get("meta") or {}
+    return {
+        "key": job.get("key"),
+        "tvdbId": job.get("tvdb_id"),
+        "seriesId": job.get("series_id"),
+        "season": job.get("season"),
+        "status": job.get("status"),
+        "statusLabel": _pack_status_label(job),
+        "attempt": job.get("attempts") or 0,
+        "maxAttempts": job.get("max_attempts") or PACK_MAX_ATTEMPTS,
+        "nextAttemptAt": job.get("next_attempt_at"),
+        "queuePosition": queue_pos,
+        "title": meta.get("title") or "",
+        "releaseTitle": job.get("release_title") or "",
+        "sizeGb": round((job.get("release_size") or 0) / 1e9, 2) if job.get("release_size") else None,
+        "seeders": job.get("release_seeders"),
+        "quality": job.get("release_quality"),
+        "aired": job.get("aired"),
+        "files": job.get("files"),
+        "missing": job.get("missing"),
+        "audioStatus": job.get("audio_status"),
+        "progress": meta.get("progress"),
+        "lastAirDate": meta.get("lastAirDate"),
+        "dryRun": bool(meta.get("dryRun")),
+        "error": job.get("error") or "",
+        "updatedAt": job.get("updated_at"),
+    }
+
+
+def _pack_notify(kind, severity, job, title, message, action="", dedupe_seconds=86400):
+    meta = (job or {}).get("meta") or {}
+    return _notify_create(
+        kind,
+        severity,
+        key=(job or {}).get("key"),
+        tvdb_id=(job or {}).get("tvdb_id"),
+        series_id=(job or {}).get("series_id"),
+        season=(job or {}).get("season"),
+        title=title,
+        message=message,
+        action=action,
+        payload={
+            "key": (job or {}).get("key"),
+            "seriesTitle": meta.get("title") or "",
+            "season": (job or {}).get("season"),
+            "releaseTitle": (job or {}).get("release_title") or "",
+        },
+        dedupe_seconds=dedupe_seconds,
+    )
+
+
+# --- Notificações / dispositivos ------------------------------------------
+
+
+def _notify_create(kind, severity, key=None, tvdb_id=None, series_id=None, season=None,
+                   title="", message="", action="", payload=None, dedupe_seconds=86400):
+    now = datetime.now(timezone.utc)
+    created = now.isoformat().replace("+00:00", "Z")
+    cutoff = (now - timedelta(seconds=dedupe_seconds)).isoformat().replace("+00:00", "Z")
+    with _db_lock:
+        conn = _db_connect()
+        try:
+            if key and dedupe_seconds:
+                row = conn.execute(
+                    "SELECT n.id FROM notifications n WHERE n.kind = ? AND n.key = ? "
+                    "AND n.created_at >= ? AND NOT EXISTS ("
+                    "  SELECT 1 FROM notification_reads r WHERE r.notification_id = n.id"
+                    ") ORDER BY n.id DESC LIMIT 1",
+                    (kind, key, cutoff),
+                ).fetchone()
+                if row:
+                    return row["id"]
+            cursor = conn.execute(
+                "INSERT INTO notifications "
+                "(kind, severity, key, tvdb_id, series_id, season, title, message, action, payload, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    kind, severity, key, tvdb_id, series_id, season, title, message,
+                    action, json.dumps(payload or {}, ensure_ascii=False), created,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+
+def _notification_public(row, user_id=None):
+    item = {
+        "id": row["id"],
+        "kind": row["kind"],
+        "severity": row["severity"],
+        "key": row["key"],
+        "tvdbId": row["tvdb_id"],
+        "seriesId": row["series_id"],
+        "season": row["season"],
+        "title": row["title"],
+        "message": row["message"],
+        "action": row["action"],
+        "payload": _json_load(row["payload"]) if row["payload"] else {},
+        "createdAt": row["created_at"],
+        "readAt": row["user_read_at"] if "user_read_at" in row.keys() else None,
+    }
+    item["read"] = bool(item["readAt"])
+    return item
+
+
+def notifications_payload(user_id, limit=50, unread_only=False):
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        return {"ok": False, "error": "user_id obrigatório"}
+    try:
+        limit = max(1, min(200, int(limit)))
+    except (TypeError, ValueError):
+        limit = 50
+    rows = _db_rows(
+        "SELECT n.*, r.read_at AS user_read_at FROM notifications n "
+        "LEFT JOIN notification_reads r "
+        "  ON r.notification_id = n.id AND r.user_id = ? "
+        "ORDER BY n.id DESC LIMIT ?",
+        (user_id, limit),
+    )
+    items = [_notification_public(row) for row in rows]
+    if unread_only:
+        items = [item for item in items if not item["read"]]
+    unread = _db_one(
+        "SELECT COUNT(*) AS total FROM notifications n WHERE NOT EXISTS ("
+        "  SELECT 1 FROM notification_reads r WHERE r.notification_id = n.id AND r.user_id = ?"
+        ")",
+        (user_id,),
+    )
+    return {"ok": True, "notifications": items, "unread": (unread["total"] if unread else 0)}
+
+
+def notifications_mark_read(notification_id, user_id):
+    try:
+        notification_id = int(notification_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "id inválido"}
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        return {"ok": False, "error": "user_id obrigatório"}
+    with _db_lock:
+        conn = _db_connect()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO notification_reads (notification_id, user_id, read_at) "
+                "VALUES (?, ?, ?)",
+                (notification_id, user_id, _now_iso()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return {"ok": True, "id": notification_id}
+
+
+def notifications_mark_all_read(user_id):
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        return {"ok": False, "error": "user_id obrigatório"}
+    with _db_lock:
+        conn = _db_connect()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO notification_reads (notification_id, user_id, read_at) "
+                "SELECT id, ?, ? FROM notifications",
+                (user_id, _now_iso()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return {"ok": True}
+
+
+def notifications_mark_pushed(notification_id, user_id, error=""):
+    try:
+        notification_id = int(notification_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "id inválido"}
+    user_id = str(user_id or "").strip()
+    if not user_id:
+        return {"ok": False, "error": "user_id obrigatório"}
+    with _db_lock:
+        conn = _db_connect()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO notification_pushes (notification_id, user_id, sent_at, error) "
+                "VALUES (?, ?, ?, ?)",
+                (notification_id, user_id, _now_iso(), error or ""),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return {"ok": True}
+
+
+def devices_upsert(payload):
+    user_id = str((payload or {}).get("user_id") or "").strip()
+    device_id = str((payload or {}).get("device_id") or "").strip()
+    token = str((payload or {}).get("fcm_token") or "").strip()
+    if not user_id or not device_id or not token:
+        return {"ok": False, "error": "user_id/device_id/fcm_token obrigatórios"}
+    now = _now_iso()
+    with _db_lock:
+        conn = _db_connect()
+        try:
+            conn.execute(
+                "INSERT INTO devices (user_id, device_id, fcm_token, platform, updated_at, last_seen_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(user_id, device_id) DO UPDATE SET "
+                "fcm_token = excluded.fcm_token, platform = excluded.platform, "
+                "updated_at = excluded.updated_at, last_seen_at = excluded.last_seen_at",
+                (user_id, device_id, token, payload.get("platform") or "", now, now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return {"ok": True}
+
+
+def devices_remove(user_id, device_id):
+    user_id = str(user_id or "").strip()
+    device_id = str(device_id or "").strip()
+    if not user_id or not device_id:
+        return {"ok": False, "error": "user_id/device_id obrigatórios"}
+    with _db_lock:
+        conn = _db_connect()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM devices WHERE user_id = ? AND device_id = ?",
+                (user_id, device_id),
+            )
+            conn.commit()
+            removed = cursor.rowcount
+        finally:
+            conn.close()
+    return {"ok": True, "removed": removed}
+
+
+# --- Worker ---------------------------------------------------------------
+
+
+def _pack_unmonitor_season(series_id, season):
+    episodes = _pack_series_episodes(series_id, refresh=True)
+    ids = [
+        episode["id"] for episode in episodes
+        if _as_int(episode.get("seasonNumber")) == _as_int(season)
+        and episode.get("monitored") and episode.get("id")
+    ]
+    key = arr_key(SONARR_CONFIG)
+    count = 0
+    if key and ids:
+        arr_request(SONARR_URL, key, "/api/v3/episode/monitor", "PUT", {
+            "episodeIds": ids, "monitored": False,
+        })
+        _pack_episode_cache.pop(_as_int(series_id), None)
+        count = len(ids)
+    try:
+        _pack_set_season_flag(series_id, season, False)
+    except Exception:
+        pass
+    return count
+
+
+def _pack_monitor_season(series_id, season):
+    episodes = _pack_series_episodes(series_id, refresh=True)
+    ids = [
+        episode["id"] for episode in episodes
+        if _as_int(episode.get("seasonNumber")) == _as_int(season)
+        and not episode.get("monitored") and episode.get("id")
+    ]
+    key = arr_key(SONARR_CONFIG)
+    count = 0
+    if key and ids:
+        arr_request(SONARR_URL, key, "/api/v3/episode/monitor", "PUT", {
+            "episodeIds": ids, "monitored": True,
+        })
+        _pack_episode_cache.pop(_as_int(series_id), None)
+        count = len(ids)
+    try:
+        _pack_set_season_flag(series_id, season, True)
+    except Exception:
+        pass
+    return count
+
+
+def _pack_mark_waiting(job, stats, series_title=""):
+    try:
+        _pack_unmonitor_season(job["series_id"], job["season"])
+    except Exception as error:
+        # Não impede o estado; o próximo tick tenta de novo.
+        job["error"] = f"desmonitorar: {error}"
+    finale = _parse_iso(stats.get("finalAirDate"))
+    next_at = (
+        (finale + timedelta(hours=PACK_RETRY_HOURS)).isoformat().replace("+00:00", "Z")
+        if finale else _iso_in(PACK_RETRY_HOURS * 3600)
+    )
+    updated = _pack_job_update(
+        job["key"],
+        status="waiting_finale",
+        next_attempt_at=next_at,
+        last_checked_at=_now_iso(),
+        aired=stats.get("aired"),
+        files=stats.get("files"),
+        missing=stats.get("missing"),
+        meta_patch={
+            "lastAirDate": stats.get("lastAirDate"),
+            "finalAirDate": stats.get("finalAirDate"),
+            "nextAirDate": stats.get("nextAirDate"),
+        },
+    )
+    title = series_title or (job.get("meta") or {}).get("title") or ""
+    finale_text = str(stats.get("finalAirDate") or "")[:10] or "data indefinida"
+    _pack_notify(
+        "waiting_finale", "info", updated or job, "Aguardando finale",
+        f"{title} T{job['season']}: último episódio em {finale_text}. "
+        f"A busca do pack começa após o finale (+{PACK_RETRY_HOURS:g} h).",
+        action="open_request", dedupe_seconds=7 * 86400,
+    )
+    return updated
+
+
+def _pack_fail(job, reason):
+    attempts = _as_int(job.get("attempts")) or 0
+    max_attempts = _as_int(job.get("max_attempts")) or PACK_MAX_ATTEMPTS
+    title = (job.get("meta") or {}).get("title") or ""
+    if attempts >= max_attempts:
+        updated = _pack_job_update(
+            job["key"], status="no_pack", error=reason,
+            next_attempt_at=_iso_in(PACK_RETRY_HOURS * 3600),
+            last_checked_at=_now_iso(),
+        )
+        _pack_notify(
+            "pack_no_pack", "warning", updated or job, "Sem pack completo",
+            f"{title} T{job['season']}: {reason} após {attempts} tentativa(s). "
+            "Você pode tentar de novo.",
+            action="retry_pack",
+        )
+        return updated
+    updated = _pack_job_update(
+        job["key"], status="queued", error=reason,
+        next_attempt_at=_iso_in(PACK_RETRY_HOURS * 3600),
+        last_checked_at=_now_iso(),
+    )
+    return updated
+
+
+def _pack_snapshot_once():
+    if _pack_state_get("snapshot_done") == "1":
+        return 0
+    try:
+        series_list = _sonarr_series(refresh=True)
+    except Exception:
+        return 0
+    candidates = _pack_monitored_seasons()
+    created = 0
+    for item in candidates:
+        series = item["series"]
+        season = item["season"]
+        tvdb_id = _as_int(series.get("tvdbId"))
+        if not tvdb_id:
+            continue
+        key = _pack_key(tvdb_id, season)
+        if _pack_job_get(key):
+            continue
+        _pack_job_upsert({
+            "key": key,
+            "tvdb_id": tvdb_id,
+            "series_id": _as_int(series.get("id")),
+            "season": season,
+            "profile_id": _as_int(series.get("qualityProfileId")),
+            "status": "ignored",
+            "attempts": 0,
+            "max_attempts": PACK_MAX_ATTEMPTS,
+            "created_at": _now_iso(),
+            "meta": {"snapshot": True, "title": series.get("title") or ""},
+        })
+        created += 1
+    _pack_state_set("snapshot_done", "1")
+    return created
+
+
+def _pack_prepare_job(job, series):
+    try:
+        episodes = _pack_series_episodes(series.get("id"), refresh=True)
+    except Exception:
+        return job
+    stats = pack_episode_stats(episodes, job["season"])
+    base = {
+        "aired": stats["aired"], "files": stats["files"],
+        "missing": stats["missing"], "last_checked_at": _now_iso(),
+    }
+    if stats["aired"] > 0 and stats["missing"] == 0:
+        return _pack_job_update(
+            job["key"], status="complete", next_attempt_at=None,
+            meta_patch={"episodeCount": stats["episodeCount"]}, **base,
+        )
+    _pack_job_update(job["key"], meta_patch={"episodeCount": stats["episodeCount"]}, **base)
+    if stats["future"]:
+        return _pack_mark_waiting(job, stats, series.get("title") or "")
+    return _pack_job_get(job["key"])
+
+
+def _pack_discover():
+    try:
+        candidates = _pack_monitored_seasons()
+    except Exception:
+        return []
+    created = []
+    for item in candidates:
+        series = item["series"]
+        season = item["season"]
+        tvdb_id = _as_int(series.get("tvdbId"))
+        if not tvdb_id:
+            continue
+        key = _pack_key(tvdb_id, season)
+        if _pack_job_get(key):
+            continue
+        job = _pack_job_upsert({
+            "key": key,
+            "tvdb_id": tvdb_id,
+            "series_id": _as_int(series.get("id")),
+            "season": season,
+            "profile_id": _as_int(series.get("qualityProfileId")),
+            "profile_name": "",
+            "status": "queued",
+            "attempts": 0,
+            "max_attempts": PACK_MAX_ATTEMPTS,
+            "next_attempt_at": None,
+            "created_at": _now_iso(),
+            "meta": {"title": series.get("title") or ""},
+        })
+        if job:
+            _pack_prepare_job(job, series)
+            created.append(key)
+    return created
+
+
+def _pack_refresh_waiting():
+    rows = _db_rows(
+        "SELECT * FROM pack_jobs WHERE status = 'waiting_finale' "
+        "AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
+        (_now_iso(),),
+    )
+    activated = []
+    for row in rows:
+        job = _pack_job_from_row(row)
+        series = _pack_series_by_tvdb(job["tvdb_id"])
+        if not series:
+            continue
+        try:
+            episodes = _pack_series_episodes(series.get("id"), refresh=True)
+        except Exception:
+            continue
+        stats = pack_episode_stats(episodes, job["season"])
+        if stats["future"]:
+            finale = _parse_iso(stats.get("finalAirDate"))
+            next_at = (
+                (finale + timedelta(hours=PACK_RETRY_HOURS)).isoformat().replace("+00:00", "Z")
+                if finale else _iso_in(PACK_RETRY_HOURS * 3600)
+            )
+            _pack_job_update(job["key"], next_attempt_at=next_at, last_checked_at=_now_iso())
+            continue
+        if stats["aired"] > 0 and stats["missing"] == 0:
+            _pack_job_update(
+                job["key"], status="complete", next_attempt_at=None,
+                aired=stats["aired"], files=stats["files"], missing=0,
+                last_checked_at=_now_iso(),
+            )
+            continue
+        try:
+            _pack_monitor_season(series.get("id"), job["season"])
+        except Exception:
+            pass
+        _pack_job_update(
+            job["key"], status="queued", next_attempt_at=None,
+            aired=stats["aired"], files=stats["files"], missing=stats["missing"],
+            last_checked_at=_now_iso(),
+        )
+        activated.append(job["key"])
+    return activated
+
+
+def _pack_track_active():
+    rows = _db_rows(
+        "SELECT * FROM pack_jobs WHERE status IN ('pack_found', 'downloading', 'importing')"
+    )
+    if not rows:
+        return 0
+    queue = _pack_queue_map()
+    changed = 0
+    for row in rows:
+        job = _pack_job_from_row(row)
+        meta = job.get("meta") or {}
+        if meta.get("dryRun"):
+            continue
+        record = queue.get(job.get("release_title") or "") or queue.get(meta.get("infoHash") or "")
+        if record:
+            state = str(record.get("trackedDownloadState") or "").lower()
+            status = "importing" if state in ("importing", "importpending", "importblocked") else "downloading"
+            _pack_job_update(
+                job["key"], status=status, last_checked_at=_now_iso(),
+                meta_patch={"progress": _pack_queue_progress(record), "queueState": state},
+            )
+            changed += 1
+            continue
+        series = _pack_series_by_tvdb(job["tvdb_id"])
+        if not series:
+            continue
+        try:
+            episodes = _pack_series_episodes(series.get("id"), refresh=True)
+        except Exception:
+            continue
+        stats = pack_episode_stats(episodes, job["season"])
+        if stats["aired"] and stats["missing"] == 0:
+            _pack_job_update(
+                job["key"], status="complete", next_attempt_at=None,
+                aired=stats["aired"], files=stats["files"], missing=0,
+                last_checked_at=_now_iso(),
+            )
+            title = meta.get("title") or ""
+            _pack_notify(
+                "pack_done", "success", job, "Pack completo",
+                f"{title} T{job['season']} completa ({stats['files']}/{stats['aired']}).",
+                action="open_request",
+            )
+            changed += 1
+            continue
+        grabbed_at = _parse_iso(meta.get("grabbedAt"))
+        elapsed = (
+            (datetime.now(timezone.utc) - grabbed_at).total_seconds()
+            if grabbed_at else PACK_GRAB_GRACE_SECONDS + 1
+        )
+        if meta.get("acceptSingle"):
+            if elapsed < PACK_RETRY_HOURS * 3600:
+                continue
+        elif elapsed < PACK_GRAB_GRACE_SECONDS:
+            continue
+        _pack_job_update(
+            job["key"], aired=stats["aired"], files=stats["files"],
+            missing=stats["missing"], last_checked_at=_now_iso(),
+        )
+        job = _pack_job_get(job["key"]) or job
+        if stats["files"] > 0 and stats["missing"] == 1 and stats["aired"] >= 2:
+            updated = _pack_job_update(
+                job["key"], status="incomplete",
+                error=f"Faltam {stats['missing']} episódio(s)",
+                next_attempt_at=_iso_in(PACK_RETRY_HOURS * 3600),
+            )
+            _pack_notify(
+                "pack_incomplete", "warning", updated or job, "Pack incompleto",
+                f"Faltam {stats['missing']} episódio(s). Você pode fechar com o "
+                "episódio solto ou tentar outro pack.",
+                action="accept_single",
+            )
+        else:
+            _pack_fail(job, f"Pack incompleto: faltam {stats['missing']} episódio(s)")
+        changed += 1
+    return changed
+
+
+def _pack_grab(job, release):
+    key = arr_key(SONARR_CONFIG)
+    if not key:
+        return _pack_fail(job, "API key do Sonarr não encontrada")
+    try:
+        arr_request(SONARR_URL, key, "/api/v3/release", "POST", release)
+    except Exception as error:
+        return _pack_fail(job, f"grab: {type(error).__name__}: {error}")
+    _pack_release_cache.pop((_as_int(job.get("series_id")), _as_int(job.get("season"))), None)
+    return _pack_job_update(
+        job["key"],
+        status="downloading",
+        error="",
+        next_attempt_at=None,
+        last_checked_at=_now_iso(),
+        meta_patch={"grabbedAt": _now_iso(), "progress": 0, "dryRun": False},
+    )
+
+
+def _pack_search_job(key):
+    job = _pack_job_get(key)
+    if not job or job.get("status") != "searching":
+        return
+    try:
+        series = _pack_series_by_tvdb(job["tvdb_id"], refresh=True)
+        if not series:
+            return _pack_fail(job, "Série não encontrada no Sonarr")
+        episodes = _pack_series_episodes(series.get("id"), refresh=True)
+        stats = pack_episode_stats(episodes, job["season"])
+        _pack_job_update(
+            job["key"], aired=stats["aired"], files=stats["files"],
+            missing=stats["missing"], last_checked_at=_now_iso(),
+        )
+        job = _pack_job_get(key) or job
+        if stats["future"]:
+            return _pack_mark_waiting(job, stats, series.get("title") or "")
+        if stats["aired"] > 0 and stats["missing"] == 0:
+            return _pack_job_update(
+                job["key"], status="complete", next_attempt_at=None,
+                aired=stats["aired"], files=stats["files"], missing=0,
+                last_checked_at=_now_iso(),
+            )
+        if stats["aired"] <= 0:
+            return _pack_fail(job, "Temporada sem episódios no ar")
+        releases = _pack_fetch_releases(series.get("id"), job["season"], refresh=True)
+        accepted, skipped = pack_filter_releases(
+            releases, job["season"], tvdb_id=job["tvdb_id"],
+            expected_episodes=stats["aired"],
+        )
+        if not accepted:
+            return _pack_fail(job, f"Sem pack completo ({len(skipped)} release(s) recusado(s))")
+        release = accepted[0]
+        quality = ((release.get("quality") or {}).get("quality") or {}).get("name") or ""
+        updated = _pack_job_update(
+            job["key"],
+            status="pack_found",
+            release_guid=release.get("guid") or "",
+            release_indexer_id=_as_int(release.get("indexerId")),
+            release_title=release.get("title") or "",
+            release_size=_as_int(release.get("size")),
+            release_seeders=_as_int(release.get("seeders")),
+            release_quality=quality,
+            error="",
+            last_checked_at=_now_iso(),
+            meta_patch={
+                "infoHash": release.get("infoHash") or "",
+                "expected": stats["aired"],
+                "candidates": len(accepted),
+                "dryRun": PACK_WORKER_DRY_RUN,
+                "release": {
+                    "guid": release.get("guid"),
+                    "indexerId": release.get("indexerId"),
+                    "title": release.get("title"),
+                },
+            },
+        )
+        if PACK_WORKER_DRY_RUN:
+            return updated
+        return _pack_grab(updated or job, release)
+    except Exception as error:
+        return _pack_fail(job, f"{type(error).__name__}: {error}")
+
+
+def _pack_reap_futures():
+    with _pack_lock:
+        finished = [(key, future) for key, future in _pack_running.items() if future.done()]
+        for key, future in finished:
+            _pack_running.pop(key, None)
+            try:
+                future.result()
+            except Exception as error:
+                _pack_state["last_error"] = f"{key}: {type(error).__name__}: {error}"
+
+
+def _pack_start_searches():
+    if _pack_executor is None:
+        return 0
+    with _pack_lock:
+        available = max(0, PACK_CONCURRENCY - len(_pack_running))
+    if available <= 0:
+        return 0
+    rows = _db_rows(
+        "SELECT * FROM pack_jobs WHERE status = 'queued' "
+        "AND (next_attempt_at IS NULL OR next_attempt_at <= ?) "
+        "ORDER BY created_at LIMIT ?",
+        (_now_iso(), available),
+    )
+    started = 0
+    for row in rows:
+        job = _pack_job_from_row(row)
+        attempts = (_as_int(job.get("attempts")) or 0) + 1
+        _pack_job_update(
+            job["key"], status="searching", attempts=attempts,
+            last_attempt_at=_now_iso(), error="",
+        )
+        with _pack_lock:
+            _pack_running[job["key"]] = _pack_executor.submit(_pack_search_job, job["key"])
+        started += 1
+    return started
+
+
+def pack_worker_tick():
+    if not PACK_WORKER_ENABLED:
+        return {"ok": True, "enabled": False}
+    started = time.time()
+    _pack_snapshot_once()
+    discovered = _pack_discover()
+    _pack_reap_futures()
+    waiting = _pack_refresh_waiting()
+    tracked = _pack_track_active()
+    searching = _pack_start_searches()
+    _pack_state["last_tick_at"] = _now_iso()
+    _pack_state["last_error"] = ""
+    return {
+        "ok": True,
+        "enabled": True,
+        "discovered": discovered,
+        "activated": waiting,
+        "tracked": tracked,
+        "started": searching,
+        "seconds": round(time.time() - started, 2),
+    }
+
+
+def _pack_worker_loop():
+    while True:
+        try:
+            pack_worker_tick()
+        except Exception as error:
+            _pack_state["last_error"] = f"{type(error).__name__}: {error}"
+        time.sleep(PACK_POLL_SECONDS)
+
+
+def pack_worker_start():
+    global _pack_executor
+    if not PACK_WORKER_ENABLED:
+        return None
+    thread = _pack_state.get("thread")
+    if thread and thread.is_alive():
+        return thread
+    if _pack_executor is None:
+        _pack_executor = ThreadPoolExecutor(max_workers=PACK_CONCURRENCY)
+    _pack_state["started_at"] = _now_iso()
+    thread = threading.Thread(target=_pack_worker_loop, name="pack-worker", daemon=True)
+    _pack_state["thread"] = thread
+    thread.start()
+    return thread
+
+
+def pack_worker_health():
+    with _pack_lock:
+        running = sorted(_pack_running.keys())
+    counts = {}
+    for row in _db_rows("SELECT status, COUNT(*) AS total FROM pack_jobs GROUP BY status"):
+        counts[row["status"]] = row["total"]
+    return {
+        "ok": True,
+        "enabled": PACK_WORKER_ENABLED,
+        "dryRun": PACK_WORKER_DRY_RUN,
+        "concurrency": PACK_CONCURRENCY,
+        "maxAttempts": PACK_MAX_ATTEMPTS,
+        "retryHours": PACK_RETRY_HOURS,
+        "startedAt": _pack_state.get("started_at"),
+        "lastTickAt": _pack_state.get("last_tick_at"),
+        "lastError": _pack_state.get("last_error"),
+        "running": running,
+        "jobs": counts,
+    }
+
+
+# --- Endpoints (media-agent) ----------------------------------------------
+
+
+def sonarr_series_payload(tvdb_id):
+    tvdb_id = _as_int(tvdb_id)
+    if not tvdb_id:
+        return {"ok": False, "error": "tvdbId inválido"}
+    try:
+        series = _pack_series_by_tvdb(tvdb_id, refresh=True)
+        if not series:
+            return {"ok": True, "series": None}
+        profiles, _ = _sonarr_options()
+        profile_names = {_as_int(p.get("id")): p.get("name") or "" for p in profiles}
+        summary = _series_summary(series, profile_names)
+        summary["seasons"] = [
+            {
+                "seasonNumber": _as_int(row.get("seasonNumber")),
+                "monitored": bool(row.get("monitored")),
+                "episodeCount": (row.get("statistics") or {}).get("totalEpisodeCount") or 0,
+                "episodeFileCount": (row.get("statistics") or {}).get("episodeFileCount") or 0,
+            }
+            for row in series.get("seasons") or []
+        ]
+        return {"ok": True, "series": summary}
+    except Exception as error:
+        return {"ok": False, "error": f"{type(error).__name__}: {error}"}
+
+
+def sonarr_releases_payload(series_id, season_number, refresh=False, limit=20):
+    series_id = _as_int(series_id)
+    season_number = _as_int(season_number)
+    if not series_id or season_number is None:
+        return {"ok": False, "error": "seriesId/seasonNumber inválidos"}
+    try:
+        releases = _pack_fetch_releases(series_id, season_number, refresh=refresh)
+        stats = pack_episode_stats(_pack_series_episodes(series_id), season_number)
+        accepted, skipped = pack_filter_releases(
+            releases, season_number,
+            expected_episodes=stats["aired"] or None,
+        )
+        try:
+            limit = max(1, min(100, int(limit)))
+        except (TypeError, ValueError):
+            limit = 20
+        items = []
+        for release in accepted[:limit]:
+            items.append({
+                "guid": release.get("guid"),
+                "indexerId": _as_int(release.get("indexerId")),
+                "indexer": release.get("indexer") or "",
+                "title": release.get("title") or "",
+                "size": _as_int(release.get("size")),
+                "sizeGb": round(_as_float(release.get("size")) / 1e9, 2),
+                "seeders": _as_int(release.get("seeders")),
+                "leechers": _as_int(release.get("leechers")),
+                "quality": ((release.get("quality") or {}).get("quality") or {}).get("name") or "",
+                "qualityWeight": _as_int(release.get("qualityWeight")),
+                "customFormatScore": _as_int(release.get("customFormatScore")),
+                "fullSeason": bool(release.get("fullSeason")),
+                "mappedSeasonNumber": _as_int(release.get("mappedSeasonNumber")),
+                "age": _as_float(release.get("age")),
+            })
+        return {
+            "ok": True,
+            "seriesId": series_id,
+            "seasonNumber": season_number,
+            "total": len(releases),
+            "fullSeason": sum(1 for release in releases if release.get("fullSeason")),
+            "accepted": len(accepted),
+            "skipped": len(skipped),
+            "episodes": stats,
+            "releases": items,
+            "rejectedReasons": _pack_reason_counts(skipped),
+        }
+    except Exception as error:
+        return {"ok": False, "error": f"{type(error).__name__}: {error}"}
+
+
+def _pack_reason_counts(skipped):
+    counts = {}
+    for item in skipped or []:
+        for reason in item.get("reasons") or []:
+            bucket = reason.split(":", 1)[0]
+            counts[bucket] = counts.get(bucket, 0) + 1
+    return dict(sorted(counts.items(), key=lambda pair: -pair[1]))
+
+
+def sonarr_season_monitor(payload):
+    try:
+        payload = payload or {}
+        series_id = _as_int(payload.get("seriesId"))
+        tvdb_id = _as_int(payload.get("tvdbId"))
+        season = _as_int(payload.get("season"))
+        if season is None:
+            season = _as_int(payload.get("seasonNumber"))
+        monitored = bool(payload.get("monitored", True))
+        search = bool(payload.get("search", False))
+        if (not series_id and not tvdb_id) or season is None:
+            return {"ok": False, "error": "seriesId/tvdbId e season obrigatórios"}
+        series = (
+            _pack_series_by_tvdb(tvdb_id, refresh=True) if tvdb_id
+            else next((s for s in _sonarr_series(refresh=True) if _as_int(s.get("id")) == series_id), None)
+        )
+        if not series:
+            return {"ok": False, "error": "série não encontrada"}
+        series_id = _as_int(series.get("id"))
+        episodes = _pack_series_episodes(series_id, refresh=True)
+        ids = [
+            episode["id"] for episode in episodes
+            if _as_int(episode.get("seasonNumber")) == season and episode.get("id")
+        ]
+        if not ids:
+            return {"ok": False, "error": "temporada sem episódios"}
+        key = arr_key(SONARR_CONFIG)
+        if not key:
+            return {"ok": False, "error": "API key do Sonarr não encontrada"}
+        changed = 0
+        for chunk in _chunks(ids):
+            arr_request(SONARR_URL, key, "/api/v3/episode/monitor", "PUT", {
+                "episodeIds": chunk, "monitored": monitored,
+            })
+            changed += len(chunk)
+        command_id = None
+        if search and monitored:
+            command = arr_request(SONARR_URL, key, "/api/v3/command", "POST", {
+                "name": "SeasonSearch",
+                "seriesId": series_id,
+                "seasonNumber": season,
+            })
+            command_id = (command or {}).get("id")
+        _pack_episode_cache.pop(series_id, None)
+        _pack_set_season_flag(series_id, season, monitored)
+        return {
+            "ok": True,
+            "seriesId": series_id,
+            "season": season,
+            "monitored": changed if monitored else 0,
+            "unmonitored": 0 if monitored else changed,
+            "searchCommand": command_id,
+        }
+    except Exception as error:
+        return {"ok": False, "error": f"{type(error).__name__}: {error}"}
+
+
+def sonarr_grab(payload):
+    try:
+        payload = payload or {}
+        series_id = _as_int(payload.get("seriesId"))
+        season = _as_int(payload.get("seasonNumber"))
+        guid = str(payload.get("guid") or "").strip()
+        indexer_id = _as_int(payload.get("indexerId"))
+        job_key = str(payload.get("jobKey") or "").strip()
+        if not series_id or season is None:
+            job = _pack_job_get(job_key) if job_key else None
+            if job:
+                series_id = job.get("series_id")
+                season = job.get("season")
+        if not series_id or season is None:
+            return {"ok": False, "error": "seriesId/seasonNumber inválidos"}
+        releases = _pack_fetch_releases(series_id, season, refresh=True)
+        release = None
+        wanted_title = str(payload.get("title") or "")
+        for candidate in releases:
+            if guid:
+                if str(candidate.get("guid") or "") != guid:
+                    continue
+            elif wanted_title and candidate.get("title") != wanted_title:
+                continue
+            if indexer_id is not None and _as_int(candidate.get("indexerId")) != indexer_id:
+                continue
+            release = candidate
+            break
+        if not release:
+            return {"ok": False, "error": "release não encontrado"}
+        reasons = pack_evaluate_release(release, season)
+        if reasons:
+            return {"ok": False, "error": "release recusado pelo filtro", "reasons": reasons}
+        key = arr_key(SONARR_CONFIG)
+        if not key:
+            return {"ok": False, "error": "API key do Sonarr não encontrada"}
+        arr_request(SONARR_URL, key, "/api/v3/release", "POST", release)
+        if job_key:
+            _pack_job_update(
+                job_key, status="downloading", error="", next_attempt_at=None,
+                release_guid=release.get("guid") or "",
+                release_indexer_id=_as_int(release.get("indexerId")),
+                release_title=release.get("title") or "",
+                release_size=_as_int(release.get("size")),
+                release_seeders=_as_int(release.get("seeders")),
+                last_checked_at=_now_iso(),
+                meta_patch={
+                    "grabbedAt": _now_iso(), "progress": 0, "dryRun": False,
+                    "infoHash": release.get("infoHash") or "",
+                },
+            )
+        _pack_release_cache.pop((series_id, season), None)
+        return {
+            "ok": True,
+            "guid": release.get("guid"),
+            "indexerId": _as_int(release.get("indexerId")),
+            "title": release.get("title") or "",
+        }
+    except Exception as error:
+        return {"ok": False, "error": f"{type(error).__name__}: {error}"}
+
+
+def pack_jobs_payload(params=None):
+    params = params or {}
+
+    def first(name):
+        value = params.get(name)
+        if isinstance(value, list):
+            return value[0] if value else None
+        return value
+
+    where = ["1=1"]
+    values = []
+    tvdb_id = _as_int(first("tvdbId") or first("tvdb_id"))
+    if tvdb_id:
+        where.append("tvdb_id = ?")
+        values.append(tvdb_id)
+    season = _as_int(first("season"))
+    if season is not None:
+        where.append("season = ?")
+        values.append(season)
+    status = str(first("status") or "").strip()
+    if status:
+        allowed = [item for item in status.split(",") if item in PACK_STATUSES]
+        if allowed:
+            where.append("status IN (" + ",".join("?" for _ in allowed) + ")")
+            values.extend(allowed)
+    if first("includeIgnored") not in ("1", "true", "yes"):
+        where.append("status != 'ignored'")
+    rows = _db_rows(
+        "SELECT * FROM pack_jobs WHERE " + " AND ".join(where) + " ORDER BY created_at",
+        tuple(values),
+    )
+    queued = _db_rows(
+        "SELECT key FROM pack_jobs WHERE status = 'queued' ORDER BY created_at"
+    )
+    positions = {row["key"]: index + 1 for index, row in enumerate(queued)}
+    jobs = [
+        _pack_job_public(_pack_job_from_row(row), positions.get(row["key"]))
+        for row in rows
+    ]
+    return {"ok": True, "jobs": jobs, "count": len(jobs)}
+
+
+def pack_retry(payload):
+    try:
+        payload = payload or {}
+        key = str(payload.get("key") or "").strip()
+        if not key:
+            tvdb_id = _as_int(payload.get("tvdbId"))
+            season = _as_int(payload.get("season"))
+            if tvdb_id and season is not None:
+                key = _pack_key(tvdb_id, season)
+        job = _pack_job_get(key)
+        if not job:
+            return {"ok": False, "error": "job não encontrado"}
+        updated = _pack_job_update(
+            key, status="queued", attempts=0, error="", next_attempt_at=None,
+            release_guid=None, release_indexer_id=None, release_title=None,
+            release_size=None, release_seeders=None, release_quality=None,
+            last_checked_at=_now_iso(),
+            meta_patch={"grabbedAt": None, "progress": None, "dryRun": False, "acceptSingle": False},
+        )
+        return {"ok": True, "job": _pack_job_public(updated)}
+    except Exception as error:
+        return {"ok": False, "error": f"{type(error).__name__}: {error}"}
+
+
+def pack_accept_single(payload):
+    try:
+        payload = payload or {}
+        key = str(payload.get("key") or "").strip()
+        if not key:
+            tvdb_id = _as_int(payload.get("tvdbId"))
+            season = _as_int(payload.get("season"))
+            if tvdb_id and season is not None:
+                key = _pack_key(tvdb_id, season)
+        job = _pack_job_get(key)
+        if not job:
+            return {"ok": False, "error": "job não encontrado"}
+        episodes = _pack_series_episodes(job["series_id"], refresh=True)
+        stats = pack_episode_stats(episodes, job["season"])
+        aired = [
+            episode for episode in episodes
+            if _as_int(episode.get("seasonNumber")) == job["season"]
+            and _pack_episode_aired(episode)
+        ]
+        missing = [episode for episode in aired if not episode.get("hasFile")]
+        if len(aired) < 2:
+            return {"ok": False, "error": "temporada com menos de 2 episódios no ar"}
+        if len(missing) != 1:
+            return {"ok": False, "error": f"faltam {len(missing)} episódios; exceção só vale para 1"}
+        episode = missing[0]
+        api_key = arr_key(SONARR_CONFIG)
+        if not api_key:
+            return {"ok": False, "error": "API key do Sonarr não encontrada"}
+        arr_request(SONARR_URL, api_key, "/api/v3/episode/monitor", "PUT", {
+            "episodeIds": [episode["id"]], "monitored": True,
+        })
+        command = arr_request(SONARR_URL, api_key, "/api/v3/command", "POST", {
+            "name": "EpisodeSearch", "episodeIds": [episode["id"]],
+        })
+        _pack_episode_cache.pop(_as_int(job["series_id"]), None)
+        updated = _pack_job_update(
+            key, status="downloading", error="", next_attempt_at=None,
+            last_checked_at=_now_iso(),
+            meta_patch={
+                "acceptSingle": True, "grabbedAt": _now_iso(), "progress": 0,
+                "singleEpisode": {
+                    "id": episode["id"],
+                    "episodeNumber": episode.get("episodeNumber"),
+                    "commandId": (command or {}).get("id"),
+                },
+            },
+        )
+        return {
+            "ok": True,
+            "episode": {
+                "id": episode["id"],
+                "episodeNumber": episode.get("episodeNumber"),
+                "title": episode.get("title") or "",
+            },
+            "aired": stats["aired"],
+            "job": _pack_job_public(updated) if updated else None,
+        }
+    except Exception as error:
+        return {"ok": False, "error": f"{type(error).__name__}: {error}"}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _allowed(self):
         try:
@@ -2342,7 +3961,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(length))
@@ -2409,6 +4028,35 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, arr_pending(include_status))
         elif self.path.startswith("/sonarr/options"):
             self._json(200, sonarr_options_payload())
+        elif self.path.startswith("/sonarr/series"):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            self._json(200, sonarr_series_payload((params.get("tvdbId") or [""])[0]))
+        elif self.path.startswith("/sonarr/releases"):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            refresh = (params.get("refresh") or ["0"])[0].lower() in ("1", "true", "yes")
+            self._json(200, sonarr_releases_payload(
+                (params.get("seriesId") or [""])[0],
+                (params.get("seasonNumber") or [""])[0],
+                refresh,
+                (params.get("limit") or ["20"])[0],
+            ))
+        elif self.path.startswith("/pack-worker/health"):
+            self._json(200, pack_worker_health())
+        elif self.path.startswith("/pack-jobs"):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            self._json(200, pack_jobs_payload(params))
+        elif self.path.startswith("/notifications"):
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            unread = (params.get("unread") or ["0"])[0].lower() in ("1", "true", "yes")
+            self._json(200, notifications_payload(
+                (params.get("user_id") or [""])[0],
+                (params.get("limit") or ["50"])[0],
+                unread,
+            ))
         elif self.path.startswith("/sonarr/lookup"):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
@@ -2452,6 +4100,43 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, sonarr_add(self._read_json()))
         elif self.path.startswith("/sonarr/episodes/monitor"):
             self._json(200, sonarr_monitor_episodes(self._read_json()))
+        elif self.path.startswith("/sonarr/season/monitor"):
+            self._json(200, sonarr_season_monitor(self._read_json()))
+        elif self.path.startswith("/sonarr/grab"):
+            self._json(200, sonarr_grab(self._read_json()))
+        elif self.path.startswith("/pack-jobs/retry"):
+            self._json(200, pack_retry(self._read_json()))
+        elif self.path.startswith("/pack-jobs/accept-single"):
+            self._json(200, pack_accept_single(self._read_json()))
+        elif self.path.startswith("/notifications/read-all"):
+            body = self._read_json()
+            self._json(200, notifications_mark_all_read(body.get("user_id")))
+        elif self.path.startswith("/notifications/read"):
+            body = self._read_json()
+            self._json(200, notifications_mark_read(body.get("id"), body.get("user_id")))
+        elif self.path.startswith("/notifications/pushed"):
+            body = self._read_json()
+            self._json(200, notifications_mark_pushed(
+                body.get("notification_id"), body.get("user_id"), body.get("error") or "",
+            ))
+        elif self.path.startswith("/devices"):
+            self._json(200, devices_upsert(self._read_json()))
+        else:
+            self._json(404, {"error": "not found"})
+
+    def do_DELETE(self):
+        if self._forbidden():
+            return
+        if self.path.startswith("/devices/"):
+            parsed = urllib.parse.urlparse(self.path)
+            parts = [part for part in parsed.path.split("/") if part]
+            if len(parts) >= 3:
+                self._json(200, devices_remove(
+                    urllib.parse.unquote(parts[1]),
+                    urllib.parse.unquote(parts[2]),
+                ))
+            else:
+                self._json(200, {"ok": False, "error": "user_id/device_id ausentes"})
         else:
             self._json(404, {"error": "not found"})
 
@@ -2471,6 +4156,11 @@ if __name__ == "__main__":
     _db_init()
     if len(sys.argv) > 1:
         raise SystemExit(_cli(sys.argv[1:]))
+    pack_worker_start()
     server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), Handler)
     print(f"media-agent {LISTEN_HOST}:{LISTEN_PORT} (state: {STATE_DB})")
+    print(
+        f"pack-worker enabled={PACK_WORKER_ENABLED} dry_run={PACK_WORKER_DRY_RUN} "
+        f"concurrency={PACK_CONCURRENCY}"
+    )
     server.serve_forever()
