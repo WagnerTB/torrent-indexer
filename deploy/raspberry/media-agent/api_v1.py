@@ -1114,8 +1114,7 @@ def make_handler(services: Services, public: bool):
             ):
                 path = (
                     f"{endpoint}?sortBy=popularity.desc&voteAverageGte=7"
-                    f"&voteCountGte=1000&{date_param}={limite}"
-                    "&page=1&language=pt-BR"
+                    f"&voteCountGte=1000&{date_param}={limite}&page=1"
                 )
                 status, text, data = services.seerr.call(cookie, "GET", path)
                 if status != 200 or not isinstance(data, dict):
@@ -1144,7 +1143,32 @@ def make_handler(services: Services, public: bool):
                     misto.append(filmes[idx])
                 if idx < len(series):
                     misto.append(series[idx])
-            payload = {"ok": True, "items": misto[:20]}
+
+            # O discover (sem language) vem em inglês; o metadata do Seerr
+            # devolve título/overview no idioma da instância (pt-BR).
+            selecionados = misto[:12]
+            for item in selecionados:
+                meta = self._seerr_metadata(
+                    cookie, item["mediaType"], item["id"]
+                )
+                if not isinstance(meta, dict):
+                    continue
+                item["title"] = (
+                    meta.get("title") or meta.get("name") or item["title"]
+                )
+                item["overview"] = meta.get("overview") or item["overview"]
+                item["posterPath"] = meta.get("posterPath") or item["posterPath"]
+                item["backdropPath"] = (
+                    meta.get("backdropPath") or item["backdropPath"]
+                )
+                item["releaseDate"] = meta.get("releaseDate") or item["releaseDate"]
+                item["firstAirDate"] = (
+                    meta.get("firstAirDate") or item["firstAirDate"]
+                )
+                if meta.get("voteAverage") is not None:
+                    item["voteAverage"] = meta.get("voteAverage")
+
+            payload = {"ok": True, "items": selecionados}
             with discover_cache_lock:
                 discover_cache["data"] = (now + 600, payload)
             self._send(200, payload)
