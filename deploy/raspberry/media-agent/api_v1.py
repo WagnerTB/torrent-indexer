@@ -34,6 +34,7 @@ Rotas públicas:
     POST /api/v1/requests         {media_type, media_id, seasons?}
     GET  /api/v1/search           ?q=&page=&language=
     GET  /api/v1/house
+    GET  /api/v1/services
     GET  /api/v1/subs/quota
 
 Rotas de admin (só no listener --admin):
@@ -44,6 +45,8 @@ Erros: `{"code": "...", "message": "..."}`.
 """
 
 from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
 
 import argparse
 import base64
@@ -211,6 +214,25 @@ class HttpJson:
     def json(self, method: str, path: str, body=None, headers=None, timeout=None):
         status, raw_headers, text = self.request(method, path, body, headers, timeout)
         return status, raw_headers, text, parse_json(text)
+
+
+def probe_http(base_url: str, path: str = "/", timeout: float = 2.0) -> dict:
+    """Testa se um serviço responde. Qualquer resposta HTTP conta como "no ar"."""
+    started = time.time()
+    try:
+        client = HttpJson(base_url, timeout=timeout)
+        status, _, _ = client.request("GET", path, timeout=timeout)
+        return {
+            "ok": True,
+            "http_code": status,
+            "latency_ms": int((time.time() - started) * 1000),
+        }
+    except Exception as exc:  # noqa: BLE001 - health check nunca deve lançar
+        return {
+            "ok": False,
+            "error": str(exc)[:120],
+            "latency_ms": int((time.time() - started) * 1000),
+        }
 
 
 # --------------------------------------------------------------------------
@@ -567,6 +589,11 @@ class Config:
     timeout: float = 10.0
     allowed_networks: tuple = field(default_factory=tuple)
     media_agent_url: str = "http://127.0.0.1:8097"
+    radarr_url: str = "http://127.0.0.1:7878"
+    sonarr_url: str = "http://127.0.0.1:8989"
+    bazarr_url: str = "http://127.0.0.1:6767"
+    prowlarr_url: str = "http://127.0.0.1:9696"
+    qbittorrent_url: str = "http://127.0.0.1:8082"
     rate_limit_session: int = 20
     rate_limit_default: int = 240
 
@@ -589,6 +616,11 @@ class Config:
             timeout=float(os.getenv("V1_TIMEOUT", "10")),
             allowed_networks=tuple(networks),
             media_agent_url=os.getenv("MEDIA_AGENT_URL", "http://127.0.0.1:8097"),
+            radarr_url=os.getenv("RADARR_URL", "http://127.0.0.1:7878"),
+            sonarr_url=os.getenv("SONARR_URL", "http://127.0.0.1:8989"),
+            bazarr_url=os.getenv("BAZARR_URL", "http://127.0.0.1:6767"),
+            prowlarr_url=os.getenv("PROWLARR_URL", "http://127.0.0.1:9696"),
+            qbittorrent_url=os.getenv("QBITTORRENT_URL", "http://127.0.0.1:8082"),
             rate_limit_session=int(os.getenv("V1_RATE_SESSION", "20")),
             rate_limit_default=int(os.getenv("V1_RATE_DEFAULT", "240")),
         )
@@ -629,6 +661,11 @@ def make_handler(services: Services, public: bool):
     meta_cache_lock = threading.Lock()
     meta_ttl = 6 * 3600.0
     meta_timeout = 3.0
+
+    # Status dos serviços (probes paralelos) com cache curto.
+    services_cache: dict[str, tuple[float, dict]] = {}
+    services_cache_lock = threading.Lock()
+    services_ttl = 15.0
 
     class Handler(BaseHTTPRequestHandler):
         server_version = f"family-bff/{VERSION}"
@@ -768,6 +805,8 @@ def make_handler(services: Services, public: bool):
                 return self._search()
             if path == "/api/v1/house" and method == "GET":
                 return self._house()
+            if path == "/api/v1/services" and method == "GET":
+                return self._services()
             if path == "/api/v1/subs/quota" and method == "GET":
                 return self._subs_quota()
             if path == "/api/v1/admin/ping" and method == "GET":
@@ -1030,6 +1069,43 @@ def make_handler(services: Services, public: bool):
                 "storage": items,
                 "generated_at": status.get("generatedAt"),
             })
+
+        def _services(self) -> None:
+            self._identity()
+            now = time.time()
+            with services_cache_lock:
+                cached = services_cache.get("data")
+                if cached and cached[0] > now:
+                    return self._send(200, cached[1])
+
+            alvos = [
+                ("jellyfin", "Jellyfin", cfg.jellyfin_url, "/System/Info/Public"),
+                ("seerr", "Seerr", cfg.seerr_url, "/api/v1/settings/public"),
+                ("bazarr", "Bazarr", cfg.bazarr_url, "/"),
+                ("radarr", "Radarr", cfg.radarr_url, "/"),
+                ("sonarr", "Sonarr", cfg.sonarr_url, "/"),
+                ("prowlarr", "Prowlarr", cfg.prowlarr_url, "/"),
+                ("qbittorrent", "qBittorrent", cfg.qbittorrent_url, "/"),
+            ]
+            with ThreadPoolExecutor(max_workers=len(alvos)) as pool:
+                futuros = [
+                    pool.submit(probe_http, base, path)
+                    for _, _, base, path in alvos
+                ]
+                resultados = [futuro.result() for futuro in futuros]
+
+            services = [
+                {"id": sid, "name": nome, **resultado}
+                for (sid, nome, _, _), resultado in zip(alvos, resultados)
+            ]
+            payload = {
+                "ok": True,
+                "services": services,
+                "generated_at": iso(time.time()),
+            }
+            with services_cache_lock:
+                services_cache["data"] = (now + services_ttl, payload)
+            self._send(200, payload)
 
         def _subs_quota(self) -> None:
             self._identity()

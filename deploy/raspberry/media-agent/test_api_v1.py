@@ -486,6 +486,21 @@ class BffTest(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(data["code"], "unauthorized")
 
+    def test_services(self):
+        token, _ = self.login()
+        status, data = http("GET", f"{self.public_url}/api/v1/services", token=token)
+        self.assertEqual(status, 200, data)
+        por_id = {item["id"]: item for item in data["services"]}
+        self.assertTrue(por_id["jellyfin"]["ok"], por_id["jellyfin"])
+        self.assertTrue(por_id["seerr"]["ok"], por_id["seerr"])
+        self.assertIn("radarr", por_id)
+        self.assertIn("qbittorrent", por_id)
+
+    def test_services_sem_auth(self):
+        status, data = http("GET", f"{self.public_url}/api/v1/services")
+        self.assertEqual(status, 401)
+        self.assertEqual(data["code"], "unauthorized")
+
     def test_media_agent_fora(self):
         cfg = api_v1.Config(
             jellyfin_url=self.jellyfin_url,
