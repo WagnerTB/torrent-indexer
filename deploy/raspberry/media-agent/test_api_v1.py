@@ -82,9 +82,69 @@ class FakeSeerr(_Base):
     requests_status = 200
     last_cookie = None
     login_calls = 0
+    include_tv_request = False
+    last_request_body = None
+
+    TV_PAYLOADS = {
+        37680: {
+            "id": 37680,
+            "name": "Homens de Terno",
+            "posterPath": "/suits.jpg",
+            "backdropPath": "/suits-b.jpg",
+            "firstAirDate": "2011-06-23",
+            "originalLanguage": "en",
+            "externalIds": {"tvdbId": 247808},
+            "keywords": [{"id": 10909, "name": "lawyer"}],
+            "genres": [{"id": 18, "name": "Drama"}],
+            "seasons": [
+                {"seasonNumber": 0, "name": "Especiais", "episodeCount": 4, "airDate": "2011-01-01"},
+                {"seasonNumber": 1, "name": "Temporada 1", "episodeCount": 12, "airDate": "2011-06-23"},
+                {"seasonNumber": 2, "name": "Temporada 2", "episodeCount": 16, "airDate": "2012-06-14"},
+            ],
+            "mediaInfo": {
+                "id": 1, "status": 4, "tvdbId": 247808,
+                "seasons": [
+                    {"seasonNumber": 1, "status": 5},
+                    {"seasonNumber": 2, "status": 1},
+                ],
+            },
+        },
+        30984: {
+            "id": 30984,
+            "name": "Bleach",
+            "posterPath": "/bleach.jpg",
+            "firstAirDate": "2004-10-05",
+            "originalLanguage": "ja",
+            "externalIds": {"tvdbId": 74796},
+            "keywords": [{"id": 210024, "name": "anime"}],
+            "genres": [{"id": 16, "name": "Animation"}],
+            "seasons": [
+                {"seasonNumber": 1, "name": "Temporada 1", "episodeCount": 20, "airDate": "2004-10-05"},
+            ],
+            "mediaInfo": {
+                "id": 2, "status": 1, "tvdbId": 74796,
+                "seasons": [{"seasonNumber": 1, "status": 1}],
+            },
+        },
+    }
+
+    TV_REQUEST = {
+        "id": 40,
+        "status": 1,
+        "type": "tv",
+        "requestedBy": {
+            "id": 2, "displayName": "Wagner",
+            "jellyfinUserId": "u-user", "jellyfinUsername": "Wagner",
+        },
+        "seasons": [{"id": 1, "seasonNumber": 1, "status": 1}],
+        "media": {
+            "id": 10, "mediaType": "tv", "tmdbId": 37680, "tvdbId": 247808, "status": 1,
+        },
+    }
 
     def do_POST(self):
         body = self._body()
+        FakeSeerr.last_request_body = body
         if self.path == "/api/v1/auth/jellyfin":
             FakeSeerr.login_calls += 1
             if (body.get("username"), body.get("password")) != ("wagner", "segredo"):
@@ -116,13 +176,21 @@ class FakeSeerr(_Base):
                 return self._send(FakeSeerr.requests_status, {"message": "sessão expirada"})
             if FakeSeerr.last_cookie != f"connect.sid={SEERR_COOKIE}":
                 return self._send(401, {"message": "não autenticado"})
+            if "take=100" in self.path:
+                return self._send(200, {
+                    "pageInfo": {"pages": 1, "results": 1},
+                    "results": [FakeSeerr.TV_REQUEST],
+                })
+            results = [{
+                "id": 7,
+                "requestedBy": {"displayName": "Wagner"},
+                "media": {"id": 1, "mediaType": "movie", "tmdbId": 603, "status": 5},
+            }]
+            if FakeSeerr.include_tv_request:
+                results.append(FakeSeerr.TV_REQUEST)
             return self._send(200, {
-                "pageInfo": {"pages": 1, "results": 1},
-                "results": [{
-                    "id": 7,
-                    "requestedBy": {"displayName": "Wagner"},
-                    "media": {"id": 1, "mediaType": "movie", "tmdbId": 603, "status": 5},
-                }],
+                "pageInfo": {"pages": 1, "results": len(results)},
+                "results": results,
             })
         if self.path == "/api/v1/movie/603":
             FakeSeerr.last_cookie = self.headers.get("Cookie")
@@ -135,6 +203,10 @@ class FakeSeerr(_Base):
             FakeSeerr.last_cookie = self.headers.get("Cookie")
             if FakeSeerr.last_cookie != f"connect.sid={SEERR_COOKIE}":
                 return self._send(401, {"message": "não autenticado"})
+            tmdb_id = api_v1.to_int(self.path.rstrip("/").rsplit("/", 1)[-1].split("?")[0])
+            payload = FakeSeerr.TV_PAYLOADS.get(tmdb_id)
+            if payload:
+                return self._send(200, payload)
             return self._send(200, {
                 "id": 1399, "name": "Serie", "posterPath": "/serie.jpg",
             })
@@ -189,6 +261,50 @@ def start(handler_cls):
 
 
 class FakeMediaAgent(_Base):
+    last = {}
+
+    PACK_JOBS = [
+        {
+            "key": "tvdb:247808:s1", "tvdbId": 247808, "seriesId": 2, "season": 1,
+            "status": "downloading", "statusLabel": "Baixando 42%", "attempt": 1,
+            "maxAttempts": 3, "nextAttemptAt": None, "queuePosition": None,
+            "title": "Suits", "releaseTitle": "Suits S01 1080p BluRay x265",
+            "sizeGb": 11.5, "seeders": 50, "quality": "Bluray-1080p",
+            "aired": 12, "files": 5, "missing": 7, "audioStatus": None,
+            "progress": 42, "dryRun": False, "error": "",
+            "updatedAt": "2026-11-25T23:00:00Z",
+        },
+        {
+            "key": "tvdb:247808:s2", "tvdbId": 247808, "seriesId": 2, "season": 2,
+            "status": "queued", "statusLabel": "Na fila para procura", "attempt": 0,
+            "maxAttempts": 3, "nextAttemptAt": None, "queuePosition": 1,
+            "title": "Suits", "releaseTitle": "", "sizeGb": None, "seeders": None,
+            "quality": None, "aired": 16, "files": 0, "missing": 16,
+            "audioStatus": None, "progress": None, "dryRun": False, "error": "",
+            "updatedAt": "2026-11-25T23:00:00Z",
+        },
+        {
+            "key": "tvdb:999:s1", "tvdbId": 999, "seriesId": 9, "season": 1,
+            "status": "no_pack", "statusLabel": "Sem pack completo", "attempt": 3,
+            "maxAttempts": 3, "nextAttemptAt": None, "queuePosition": None,
+            "title": "Outra", "releaseTitle": "", "sizeGb": None, "seeders": None,
+            "quality": None, "aired": 10, "files": 0, "missing": 10,
+            "audioStatus": None, "progress": None, "dryRun": False,
+            "error": "Sem pack completo", "updatedAt": "2026-11-25T23:00:00Z",
+        },
+    ]
+
+    NOTIFICATIONS = [
+        {"id": 11, "kind": "pack_done", "severity": "success", "key": "tvdb:247808:s1",
+         "tvdbId": 247808, "seriesId": 2, "season": 1, "title": "Pack completo",
+         "message": "Suits T1 completa (12/12).", "action": "open_request",
+         "payload": {}, "createdAt": "2026-11-25T23:00:00Z", "read": False},
+        {"id": 12, "kind": "pack_no_pack", "severity": "warning", "key": "tvdb:999:s1",
+         "tvdbId": 999, "seriesId": 9, "season": 1, "title": "Sem pack completo",
+         "message": "Outra T1 sem pack.", "action": "retry_pack",
+         "payload": {}, "createdAt": "2026-11-25T22:00:00Z", "read": False},
+    ]
+
     def do_GET(self):
         if self.path == "/status":
             return self._send(200, {
@@ -231,14 +347,53 @@ class FakeMediaAgent(_Base):
                      "missing_subtitles": [{"name": "Portuguese (Brazil)", "code2": "pb"}]},
                 ], "total": 1})
             return self._send(404, {"message": "not found"})
+        if self.path.startswith("/pack-jobs"):
+            jobs = list(FakeMediaAgent.PACK_JOBS)
+            if "tvdbId=247808" in self.path:
+                jobs = [job for job in jobs if job["tvdbId"] == 247808]
+            elif "tvdbId=999" in self.path:
+                jobs = [job for job in jobs if job["tvdbId"] == 999]
+            return self._send(200, {"ok": True, "jobs": jobs, "count": len(jobs)})
+        if self.path.startswith("/notifications"):
+            items = [dict(item) for item in FakeMediaAgent.NOTIFICATIONS]
+            if "user_id=u-admin" in self.path:
+                for item in items:
+                    item["read"] = False
+            return self._send(200, {
+                "ok": True,
+                "notifications": items,
+                "unread": sum(1 for item in items if not item["read"]),
+            })
+        if self.path.startswith("/sonarr/series"):
+            return self._send(200, {"ok": True, "series": {
+                "id": 2, "tvdbId": 247808, "title": "Suits",
+                "seasons": [{"seasonNumber": 1, "monitored": True}],
+            }})
         return self._send(404, {"message": "not found"})
 
     def do_POST(self):
         body = self._body()
+        FakeMediaAgent.last[self.path.split("?")[0]] = body
         if self.path == "/requests/hide":
             return self._send(200, {"ok": True, "updated": 1, "hidden": True})
         if self.path in ("/arr/search", "/arr/switch"):
             return self._send(200, {"ok": True, "profile": 9})
+        if self.path.startswith("/pack-jobs/retry"):
+            return self._send(200, {"ok": True, "job": {"status": "queued"}})
+        if self.path.startswith("/pack-jobs/accept-single"):
+            return self._send(200, {"ok": True, "episode": {"episodeNumber": 8}})
+        if self.path.startswith("/sonarr/season/monitor"):
+            return self._send(200, {"ok": True, "monitored": 12})
+        if self.path.startswith("/notifications/read"):
+            return self._send(200, {"ok": True})
+        if self.path.startswith("/devices"):
+            return self._send(200, {"ok": True})
+        return self._send(404, {"message": "not found"})
+
+    def do_DELETE(self):
+        FakeMediaAgent.last[self.path] = {}
+        if self.path.startswith("/devices/"):
+            return self._send(200, {"ok": True, "removed": 1})
         return self._send(404, {"message": "not found"})
 
 
@@ -301,6 +456,9 @@ class BffTest(unittest.TestCase):
     def setUp(self):
         FakeSeerr.requests_status = 200
         FakeSeerr.last_cookie = None
+        FakeSeerr.include_tv_request = False
+        FakeSeerr.last_request_body = None
+        FakeMediaAgent.last = {}
         FakeJellyfin.me_calls = 0
         self.services.auth._cache.clear()
         self.services.store.delete("u-user", "dev-1")
@@ -771,6 +929,175 @@ class BffTest(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+
+    # ---- packs por temporada (Fase 2) ----------------------------------
+
+    def test_tv_temporadas_normalizadas(self):
+        token, _ = self.login()
+        self.link(token)
+        status, data = http("GET", f"{self.public_url}/api/v1/tv/37680", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["tvdbId"], 247808)
+        self.assertEqual(data["title"], "Homens de Terno")
+        self.assertFalse(data["anime"])
+        seasons = {season["seasonNumber"]: season for season in data["seasons"]}
+        self.assertNotIn(0, seasons)
+        self.assertEqual(seasons[1]["status"], "available")
+        self.assertTrue(seasons[1]["requested"])
+        self.assertEqual(seasons[2]["status"], "missing")
+        self.assertFalse(seasons[2]["requested"])
+
+    def test_tv_anime(self):
+        token, _ = self.login()
+        self.link(token)
+        status, data = http("GET", f"{self.public_url}/api/v1/tv/30984", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertTrue(data["anime"])
+        self.assertEqual(data["tvdbId"], 74796)
+
+    def test_pedido_anime_usa_perfis_8_e_10(self):
+        for profile, expected in (("legendado", 8), ("dublado", 10)):
+            with self.subTest(profile=profile):
+                token, _ = self.login()
+                self.link(token)
+                status, data = http(
+                    "POST", f"{self.public_url}/api/v1/requests",
+                    {"media_type": "tv", "media_id": 30984, "seasons": [1],
+                     "profile": profile},
+                    token=token,
+                )
+                self.assertEqual(status, 201, data)
+                self.assertEqual(data["echo"]["profileId"], expected)
+                self.assertIn("/sonarr/season/monitor", FakeMediaAgent.last)
+
+    def test_pedido_serie_comum_dublado_perfil_9(self):
+        token, _ = self.login()
+        self.link(token)
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests",
+            {"media_type": "tv", "media_id": 37680, "seasons": [1],
+             "profile": "dublado"},
+            token=token,
+        )
+        self.assertEqual(status, 201, data)
+        self.assertEqual(data["echo"]["profileId"], 9)
+
+    def test_pedidos_traz_pack(self):
+        FakeSeerr.include_tv_request = True
+        token, _ = self.login()
+        self.link(token)
+        status, data = http("GET", f"{self.public_url}/api/v1/requests", token=token)
+        self.assertEqual(status, 200, data)
+        pedido = next(
+            item for item in data["results"]
+            if item["media"]["mediaType"] == "tv"
+        )
+        media = pedido["media"]
+        self.assertEqual(media["pack"]["key"], "tvdb:247808:s1")
+        self.assertEqual(media["pack"]["status"], "downloading")
+        self.assertEqual(media["pack"]["statusLabel"], "Baixando 42%")
+        temporadas = {job["season"] for job in media["packs"]}
+        self.assertEqual(temporadas, {1})
+        self.assertNotIn(999, [job["tvdbId"] for job in media["packs"]])
+
+    def test_retry_pack(self):
+        token, _ = self.login()
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests/retry",
+            {"key": "tvdb:247808:s1"}, token=token,
+        )
+        self.assertEqual(status, 200, data)
+        self.assertTrue(data["ok"])
+        self.assertEqual(
+            FakeMediaAgent.last["/pack-jobs/retry"],
+            {"key": "tvdb:247808:s1"},
+        )
+
+    def test_accept_single(self):
+        token, _ = self.login()
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests/accept-single",
+            {"tvdbId": 247808, "season": 1}, token=token,
+        )
+        self.assertEqual(status, 200, data)
+        self.assertTrue(data["ok"])
+        self.assertEqual(
+            FakeMediaAgent.last["/pack-jobs/accept-single"],
+            {"tvdbId": 247808, "season": 1},
+        )
+
+    def test_accept_single_sem_alvo(self):
+        token, _ = self.login()
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests/accept-single",
+            {}, token=token,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(data["code"], "pack_target_required")
+
+    def test_notifications_filtra_por_usuario(self):
+        token, _ = self.login()
+        self.link(token)
+        status, data = http("GET", f"{self.public_url}/api/v1/notifications", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual([item["id"] for item in data["notifications"]], [11])
+        self.assertEqual(data["unread"], 1)
+
+    def test_notifications_admin_ve_tudo(self):
+        token, _ = self.login(device="dev-admin", token="jf-admin")
+        self.link(token, device="dev-admin")
+        status, data = http("GET", f"{self.public_url}/api/v1/notifications", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(len(data["notifications"]), 2)
+
+    def test_notification_mark_read(self):
+        token, _ = self.login()
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/notifications/read",
+            {"id": 11}, token=token,
+        )
+        self.assertEqual(status, 200, data)
+        self.assertEqual(
+            FakeMediaAgent.last["/notifications/read"],
+            {"id": 11, "user_id": "u-user"},
+        )
+
+    def test_notification_mark_all_read(self):
+        token, _ = self.login()
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/notifications/read-all",
+            {}, token=token,
+        )
+        self.assertEqual(status, 200, data)
+        self.assertEqual(
+            FakeMediaAgent.last["/notifications/read-all"],
+            {"user_id": "u-user"},
+        )
+
+    def test_devices_registrar_e_remover(self):
+        token, _ = self.login()
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/devices",
+            {"fcm_token": "tok-1", "platform": "android"}, token=token,
+        )
+        self.assertEqual(status, 200, data)
+        self.assertEqual(
+            FakeMediaAgent.last["/devices"],
+            {"user_id": "u-user", "device_id": "dev-1",
+             "fcm_token": "tok-1", "platform": "android"},
+        )
+        status, data = http(
+            "DELETE", f"{self.public_url}/api/v1/devices/dev-1", token=token,
+        )
+        self.assertEqual(status, 200, data)
+        self.assertIn("/devices/u-user/dev-1", FakeMediaAgent.last)
+
+    def test_pack_action_sem_auth(self):
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/requests/retry", {"key": "x"}
+        )
+        self.assertEqual(status, 401)
 
 
 class SecretBoxTest(unittest.TestCase):

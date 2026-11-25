@@ -32,8 +32,16 @@ Rotas públicas:
     GET  /api/v1/me
     GET  /api/v1/requests
     POST /api/v1/requests         {media_type, media_id, seasons?}
+    GET  /api/v1/tv/{tmdbId}      temporadas normalizadas + pack
+    POST /api/v1/requests/retry   {key | tvdbId+season}
+    POST /api/v1/requests/accept-single {key | tvdbId+season}
     POST /api/v1/requests/hide    {key}
     POST /api/v1/requests/profile {kind, id, profile: legendado|dublado}
+    GET  /api/v1/notifications    ?limit=&unread=
+    POST /api/v1/notifications/read     {id}
+    POST /api/v1/notifications/read-all
+    POST /api/v1/devices          {fcm_token, device_id?, platform?}
+    DELETE /api/v1/devices/{deviceId}
     GET  /api/v1/search           ?q=&page=&language=
     GET  /api/v1/discover
     GET  /api/v1/house
@@ -75,6 +83,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
 VERSION = "0.1.0"
+# Keyword TMDB usada pelo Seerr para marcar anime (ver PLANO_PACKS_TEMPORADA.md).
+ANIME_KEYWORD_ID = 210024
 JELLYFIN_HEADER = (
     'MediaBrowser Client="family-bff", Device="server", '
     'DeviceId="family-bff", Version="' + VERSION + '"'
@@ -117,6 +127,13 @@ def parse_json(text: str):
     try:
         return json.loads(text) if text else None
     except json.JSONDecodeError:
+        return None
+
+
+def to_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
         return None
 
 
@@ -443,6 +460,19 @@ class MediaAgentClient:
             )
         return data
 
+    def delete(self, path: str, timeout: float | None = None):
+        try:
+            status, _, text, data = self.http.json("DELETE", path, timeout=timeout)
+        except OSError as exc:
+            raise ApiError(
+                503, "media_agent_unavailable", f"media-agent inacessível: {exc}"
+            ) from None
+        if status != 200 or data is None:
+            raise ApiError(
+                503, "media_agent_unavailable", f"media-agent respondeu {status}"
+            )
+        return data
+
 
 class RateLimiter:
     """Janela deslizante simples, por chave (IP + bucket)."""
@@ -712,6 +742,16 @@ def make_handler(services: Services, public: bool):
     discover_cache: dict[str, tuple[float, dict]] = {}
     discover_cache_lock = threading.Lock()
 
+    # Jobs de pack por tvdbId (status no card), cache curto.
+    pack_cache: dict[int, tuple[float, list]] = {}
+    pack_cache_lock = threading.Lock()
+    pack_ttl = 10.0
+
+    # (tvdbId, temporada) que o usuário pediu, para filtrar avisos, cache 30 s.
+    pairs_cache: dict[str, tuple[float, set]] = {}
+    pairs_cache_lock = threading.Lock()
+    pairs_ttl = 30.0
+
     class Handler(BaseHTTPRequestHandler):
         server_version = f"family-bff/{VERSION}"
         protocol_version = "HTTP/1.1"
@@ -805,6 +845,9 @@ def make_handler(services: Services, public: bool):
         def do_POST(self):
             self._dispatch("POST")
 
+        def do_DELETE(self):
+            self._dispatch("DELETE")
+
         def _dispatch(self, method: str) -> None:
             path = urlsplit(self.path).path.rstrip("/") or "/"
             try:
@@ -850,6 +893,25 @@ def make_handler(services: Services, public: bool):
                 return self._hide_request()
             if path == "/api/v1/requests/profile" and method == "POST":
                 return self._change_profile()
+            if path == "/api/v1/requests/retry" and method == "POST":
+                return self._retry_request()
+            if path == "/api/v1/requests/accept-single" and method == "POST":
+                return self._accept_single()
+            if path == "/api/v1/notifications" and method == "GET":
+                return self._notifications()
+            if path == "/api/v1/notifications/read" and method == "POST":
+                return self._notification_read()
+            if path == "/api/v1/notifications/read-all" and method == "POST":
+                return self._notification_read_all()
+            if path == "/api/v1/devices" and method == "POST":
+                return self._register_device()
+            if path.startswith("/api/v1/tv/") and method == "GET":
+                tmdb_id = to_int(path.rsplit("/", 1)[-1])
+                if tmdb_id is None:
+                    raise ApiError(404, "not_found", "rota inexistente")
+                return self._tv_detail(tmdb_id)
+            if path.startswith("/api/v1/devices/") and method == "DELETE":
+                return self._delete_device(path.rsplit("/", 1)[-1])
             if path == "/api/v1/search" and method == "GET":
                 return self._search()
             if path == "/api/v1/discover" and method == "GET":
@@ -963,7 +1025,7 @@ def make_handler(services: Services, public: bool):
                 )
             raise ApiError(502, "seerr_unavailable", f"Seerr respondeu {status}")
 
-        def _seerr_metadata(self, cookie: str, media_type: str, tmdb_id: int):
+        def _seerr_metadata(self, cookie: str, media_type: str, tmdb_id: int, timeout=None):
             """Busca título/pôster no Seerr, com cache em memória (6 h)."""
             key = (media_type, tmdb_id)
             now = time.time()
@@ -973,7 +1035,7 @@ def make_handler(services: Services, public: bool):
                     return cached[1]
             status, _, meta = services.seerr.call(
                 cookie, "GET", f"/api/v1/{media_type}/{tmdb_id}",
-                timeout=meta_timeout,
+                timeout=timeout or meta_timeout,
             )
             if status != 200 or not isinstance(meta, dict):
                 return None
@@ -1010,8 +1072,79 @@ def make_handler(services: Services, public: bool):
                 arr_cache["data"] = (now + arr_ttl, (movies, series))
             return movies, series
 
+        def _is_anime(self, details) -> bool:
+            if not isinstance(details, dict):
+                return False
+            for keyword in details.get("keywords") or []:
+                if isinstance(keyword, dict) and to_int(keyword.get("id")) == ANIME_KEYWORD_ID:
+                    return True
+            genres = details.get("genres") or []
+            animation = any(
+                isinstance(genre, dict) and to_int(genre.get("id")) == 16
+                for genre in genres
+            )
+            return bool(animation and details.get("originalLanguage") in ("ja", "zh", "ko"))
+
+        def _request_pairs(self, cookie: str, identity):
+            """{(tvdbId, temporada)} dos pedidos do usuário (None = indisponível)."""
+            user_id = str(identity.get("sub") or "")
+            now = time.time()
+            with pairs_cache_lock:
+                cached = pairs_cache.get(user_id)
+                if cached and cached[0] > now:
+                    return cached[1]
+            status, _, data = services.seerr.call(
+                cookie,
+                "GET",
+                "/api/v1/request?take=100&skip=0&filter=all&sort=added",
+                timeout=8,
+            )
+            if status != 200 or not isinstance(data, dict):
+                return None
+            pairs = set()
+            for request in data.get("results") or []:
+                if not isinstance(request, dict):
+                    continue
+                media = request.get("media") or {}
+                tvdb_id = to_int(media.get("tvdbId"))
+                if not tvdb_id:
+                    continue
+                seasons = request.get("seasons") or []
+                numbers = []
+                for season in seasons:
+                    number = to_int(
+                        season.get("seasonNumber") if isinstance(season, dict) else season
+                    )
+                    if number is not None:
+                        numbers.append(number)
+                if not numbers:
+                    pairs.add((tvdb_id, None))
+                for number in numbers:
+                    pairs.add((tvdb_id, number))
+            with pairs_cache_lock:
+                pairs_cache[user_id] = (now + pairs_ttl, pairs)
+            return pairs
+
+        def _pack_jobs_for(self, tvdb_id: int):
+            now = time.time()
+            with pack_cache_lock:
+                cached = pack_cache.get(tvdb_id)
+                if cached and cached[0] > now:
+                    return cached[1]
+            try:
+                data = services.media_agent.get(f"/pack-jobs?tvdbId={tvdb_id}", timeout=6)
+            except ApiError:
+                data = {}
+            jobs = [
+                job for job in (data.get("jobs") or [])
+                if isinstance(job, dict) and job.get("status") != "ignored"
+            ]
+            with pack_cache_lock:
+                pack_cache[tvdb_id] = (now + pack_ttl, jobs)
+            return jobs
+
         def _enrich_requests(self, cookie: str, data):
-            """Adiciona pôster/título (Seerr) e status/progresso (*arr)."""
+            """Adiciona pôster/título (Seerr), status/progresso (*arr) e pack."""
             if not isinstance(data, dict):
                 return data
             results = data.get("results")
@@ -1071,6 +1204,35 @@ def make_handler(services: Services, public: bool):
                             or ""
                         ),
                     }
+
+                # 3) Status do pack por temporada (worker do media-agent).
+                if media_type == "tv":
+                    tvdb_id = to_int(media.get("tvdbId"))
+                    if tvdb_id:
+                        jobs = self._pack_jobs_for(tvdb_id)
+                        wanted = set()
+                        for season in pedido.get("seasons") or []:
+                            number = to_int(
+                                season.get("seasonNumber")
+                                if isinstance(season, dict) else season
+                            )
+                            if number is not None:
+                                wanted.add(number)
+                        selected = [
+                            job for job in jobs
+                            if not wanted or to_int(job.get("season")) in wanted
+                        ]
+                        if selected:
+                            media["packs"] = selected
+                            media["pack"] = next(
+                                (
+                                    job for job in selected
+                                    if job.get("status") in (
+                                        "searching", "pack_found", "downloading", "importing",
+                                    )
+                                ),
+                                selected[0],
+                            )
             return data
 
         def _list_requests(self) -> None:
@@ -1087,6 +1249,178 @@ def make_handler(services: Services, public: bool):
             )
             data = self._seerr_result(status, text, data)
             self._send(200, self._enrich_requests(cookie, data))
+
+        def _notification_visible(self, note, pairs) -> bool:
+            if pairs is None:
+                return False
+            tvdb_id = to_int(note.get("tvdbId"))
+            if not tvdb_id:
+                return False
+            season = to_int(note.get("season"))
+            if season is None:
+                return any(pair[0] == tvdb_id for pair in pairs)
+            return (tvdb_id, season) in pairs
+
+        def _tv_detail(self, tmdb_id: int) -> None:
+            identity = self._identity()
+            cookie = self._seerr_cookie(identity)
+            details = self._seerr_metadata(cookie, "tv", tmdb_id, timeout=6.0)
+            if not isinstance(details, dict):
+                raise ApiError(502, "seerr_unavailable", "não foi possível carregar a série")
+            media_info = details.get("mediaInfo") or {}
+            status_by_season = {}
+            for row in media_info.get("seasons") or []:
+                if isinstance(row, dict):
+                    status_by_season[to_int(row.get("seasonNumber"))] = to_int(row.get("status"))
+            external = details.get("externalIds") or {}
+            tvdb_id = to_int(external.get("tvdbId")) or to_int(media_info.get("tvdbId"))
+            pairs = self._request_pairs(cookie, identity) or set()
+            seasons = []
+            for row in details.get("seasons") or []:
+                if not isinstance(row, dict):
+                    continue
+                number = to_int(row.get("seasonNumber"))
+                if number is None or number <= 0:
+                    continue
+                state = status_by_season.get(number)
+                if state == 5:
+                    status = "available"
+                elif state in (2, 3, 4):
+                    status = "partial"
+                else:
+                    status = "missing"
+                requested = bool(
+                    tvdb_id and (
+                        (tvdb_id, number) in pairs or (tvdb_id, None) in pairs
+                    )
+                )
+                seasons.append({
+                    "seasonNumber": number,
+                    "name": row.get("name") or f"Temporada {number}",
+                    "episodeCount": to_int(row.get("episodeCount")) or 0,
+                    "airDate": row.get("airDate"),
+                    "status": status,
+                    "requested": requested,
+                })
+            self._send(200, {
+                "ok": True,
+                "tmdbId": tmdb_id,
+                "tvdbId": tvdb_id,
+                "title": details.get("name") or details.get("title") or "",
+                "posterPath": details.get("posterPath"),
+                "backdropPath": details.get("backdropPath"),
+                "firstAirDate": details.get("firstAirDate"),
+                "anime": self._is_anime(details),
+                "mediaStatus": to_int(media_info.get("status")),
+                "seasons": seasons,
+            })
+
+        def _notifications(self) -> None:
+            identity = self._identity()
+            cookie = self._seerr_cookie(identity)
+            query = self._query()
+            limit = min(max(to_int((query.get("limit") or ["50"])[0]) or 50, 1), 100)
+            unread_only = (query.get("unread") or ["0"])[0].lower() in ("1", "true", "yes")
+            data = services.media_agent.get(
+                f"/notifications?user_id={quote(str(identity['sub']))}&limit=200",
+                timeout=8,
+            )
+            items = [
+                item for item in (data.get("notifications") or [])
+                if isinstance(item, dict)
+            ]
+            if not identity.get("adm"):
+                pairs = self._request_pairs(cookie, identity)
+                items = [
+                    item for item in items
+                    if self._notification_visible(item, pairs)
+                ]
+            if unread_only:
+                items = [item for item in items if not item.get("read")]
+            unread = sum(1 for item in items if not item.get("read"))
+            self._send(200, {
+                "ok": True,
+                "notifications": items[:limit],
+                "unread": unread,
+            })
+
+        def _notification_read(self) -> None:
+            identity = self._identity()
+            body = self._body()
+            notification_id = to_int(body.get("id"))
+            if notification_id is None:
+                raise ApiError(400, "id_required", "informe id")
+            data = services.media_agent.post(
+                "/notifications/read",
+                {"id": notification_id, "user_id": str(identity["sub"])},
+                timeout=8,
+            )
+            self._send(200, data)
+
+        def _notification_read_all(self) -> None:
+            identity = self._identity()
+            data = services.media_agent.post(
+                "/notifications/read-all",
+                {"user_id": str(identity["sub"])},
+                timeout=8,
+            )
+            self._send(200, data)
+
+        def _pack_action(self, path: str) -> None:
+            self._identity()
+            body = self._body()
+            key = str(body.get("key") or "").strip()
+            if key:
+                payload = {"key": key}
+            else:
+                tvdb_id = to_int(body.get("tvdbId"))
+                season = to_int(body.get("season"))
+                if not tvdb_id or season is None:
+                    raise ApiError(400, "pack_target_required", "informe key ou tvdbId+season")
+                payload = {"tvdbId": tvdb_id, "season": season}
+            data = services.media_agent.post(path, payload, timeout=15)
+            if not data.get("ok"):
+                raise ApiError(
+                    409, "pack_action_failed",
+                    str(data.get("error") or "não foi possível executar a ação"),
+                )
+            self._send(200, data)
+
+        def _retry_request(self) -> None:
+            self._pack_action("/pack-jobs/retry")
+
+        def _accept_single(self) -> None:
+            self._pack_action("/pack-jobs/accept-single")
+
+        def _register_device(self) -> None:
+            identity = self._identity()
+            body = self._body()
+            token = str(body.get("fcm_token") or "").strip()
+            device_id = str(body.get("device_id") or identity["dev"]).strip()
+            if not token or not device_id:
+                raise ApiError(400, "device_required", "informe fcm_token e device_id")
+            data = services.media_agent.post(
+                "/devices",
+                {
+                    "user_id": str(identity["sub"]),
+                    "device_id": device_id,
+                    "fcm_token": token,
+                    "platform": str(body.get("platform") or ""),
+                },
+                timeout=8,
+            )
+            self._send(200, data)
+
+        def _delete_device(self, device_id: str) -> None:
+            identity = self._identity()
+            device_id = str(device_id or "").strip()
+            if not device_id:
+                raise ApiError(400, "device_required", "informe device_id")
+            data = services.media_agent.delete(
+                f"/devices/{quote(str(identity['sub']))}/{quote(device_id)}",
+                timeout=8,
+            )
+            self._send(200, data)
 
         def _search(self) -> None:
             identity = self._identity()
@@ -1286,6 +1620,30 @@ def make_handler(services: Services, public: bool):
                 discover_cache[cache_key] = (now + 600, payload)
             self._send(200, payload)
 
+        def _ensure_seasons_monitored(self, details, seasons) -> None:
+            """Garante a flag `seasons[].monitored` (best-effort) após o pedido."""
+            external = (details or {}).get("externalIds") or {}
+            tvdb_id = to_int(external.get("tvdbId"))
+            if not tvdb_id:
+                return
+            for season in seasons:
+                number = to_int(season)
+                if number is None:
+                    continue
+                try:
+                    services.media_agent.post(
+                        "/sonarr/season/monitor",
+                        {
+                            "tvdbId": tvdb_id,
+                            "season": number,
+                            "monitored": True,
+                            "search": False,
+                        },
+                        timeout=8,
+                    )
+                except ApiError:
+                    pass
+
         def _create_request(self) -> None:
             identity = self._identity()
             cookie = self._seerr_cookie(identity)
@@ -1310,11 +1668,18 @@ def make_handler(services: Services, public: bool):
                         raise ApiError(400, "invalid_seasons", "seasons inválido") from None
 
             # Perfil alvo (dublado/legendado). IDs do *arr usados pela casa;
-            # para anime os IDs diferem (10/9 no filme e 10/8 na série).
+            # para anime os IDs diferem (10/8 na série, conforme o plano).
             profile = str(body.get("profile") or "").strip().lower()
+            details = None
+            anime = False
+            if media_type == "tv":
+                details = self._seerr_metadata(cookie, "tv", media_id, timeout=6.0)
+                anime = self._is_anime(details)
             if profile in ("dublado", "legendado"):
                 if media_type == "movie":
                     payload["profileId"] = 8 if profile == "dublado" else 7
+                elif anime:
+                    payload["profileId"] = 10 if profile == "dublado" else 8
                 else:
                     payload["profileId"] = 9 if profile == "dublado" else 7
 
@@ -1322,6 +1687,8 @@ def make_handler(services: Services, public: bool):
                 cookie, "POST", "/api/v1/request", body=payload
             )
             if status in (200, 201, 202) and data is not None:
+                if media_type == "tv" and isinstance(payload.get("seasons"), list):
+                    self._ensure_seasons_monitored(details, payload["seasons"])
                 return self._send(201, data)
             if status == 409:
                 raise ApiError(409, "already_requested", "pedido já existente")
