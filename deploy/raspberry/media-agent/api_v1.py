@@ -1167,6 +1167,7 @@ def make_handler(services: Services, public: bool):
                 )
                 if meta.get("voteAverage") is not None:
                     item["voteAverage"] = meta.get("voteAverage")
+                item["mediaInfo"] = meta.get("mediaInfo") or item.get("mediaInfo")
 
             payload = {"ok": True, "items": selecionados}
             with discover_cache_lock:
