@@ -240,7 +240,7 @@ Teste realizado com `FLARESOLVERR_ADDRESS=http://<LAN_IP>.1:8191`
   Stremio 11470/12470, gaming 8098 (status/WOL com senha) e media-agent 8097
   (Pedidos/Legendas).
 - LAN-only (`<LAN_IP>`): Radarr 7878, Sonarr 8989, Prowlarr 9696, Bazarr
-  6767, qBittorrent WebUI 8082, métricas 8081, gaming-agent 8099 (só WOL) e
+  6767, qBittorrent WebUI 8082, métricas 8081, gaming-agent 8100 (só WOL) e
   `media-gateway` (sem porta).
 - Homepage adaptativo: `<LAN_IP>:3000` mostra tudo; `<TAILSCALE_IP>:3000`
   esconde os cards de gestão e mantém Jellyfin/Seerr/Stremio + PC Casa e as
@@ -254,7 +254,7 @@ Teste realizado com `FLARESOLVERR_ADDRESS=http://<LAN_IP>.1:8191`
 - WOL remoto: o card PC Casa usa `:8098/gaming/status` e `:8098/gaming/wake`;
   a senha vem de `GAMING_PASSWORD` no `.env` e o WOL exige
   `X-Gaming-Password` (5 falhas/min); `.gaming_password` é fallback legado. O
-  8099 privado continua LAN-only.
+  8100 privado continua LAN-only.
 - A chave do Bazarr saiu do `custom.js`; a aba Legendas usa o proxy
   `/bazarr` do media-agent e a chave fica em
   `<CONFIG_ROOT>/media-agent/.bazarr_key`.

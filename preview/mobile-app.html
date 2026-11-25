@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#070d18">
+<title>Casa Mídia — prévia do app</title>
+<style>
+  :root {
+    --bg: #070d18;
+    --surface: #111a2b;
+    --surface-2: #172238;
+    --surface-3: #1d2b44;
+    --line: rgba(255, 255, 255, .075);
+    --line-strong: rgba(255, 255, 255, .14);
+    --text: #f1f5f9;
+    --muted: #8a9bb4;
+    --muted-2: #64748b;
+    --accent: #4f8cff;
+    --accent-soft: rgba(79, 140, 255, .14);
+    --green: #34d399;
+    --green-soft: rgba(52, 211, 153, .13);
+    --amber: #fbbf24;
+    --amber-soft: rgba(251, 191, 36, .13);
+    --red: #f87171;
+    --red-soft: rgba(248, 113, 113, .13);
+    --violet: #a78bfa;
+    --violet-soft: rgba(167, 139, 250, .14);
+    --radius: 20px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background:
+      radial-gradient(900px 600px at 15% -10%, rgba(79, 140, 255, .14), transparent 60%),
+      radial-gradient(700px 500px at 100% 110%, rgba(52, 211, 153, .08), transparent 60%),
+      #05080f;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    display: grid;
+    place-items: center;
+    min-height: 100dvh;
+    padding: 24px 0;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { border: 0; background: none; cursor: pointer; padding: 0; }
+  .phone {
+    width: 390px;
+    height: 844px;
+    max-height: calc(100dvh - 48px);
+    background: #1e293b;
+    border: 8px solid #1e293b;
+    border-radius: 48px;
+    box-shadow: 0 40px 90px rgba(0, 0, 0, .65), 0 0 0 1px rgba(255, 255, 255, .06) inset;
+    overflow: hidden;
+    position: relative;
+  }
+  .app {
+    position: relative;
+    height: 100%;
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 40px;
+  }
+  .statusbar {
+    height: 42px;
+    flex: 0 0 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 22px 0 26px;
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: .2px;
+    color: #e2e8f0;
+  }
+  .statusbar .icons { display: flex; align-items: center; gap: 6px; opacity: .9; }
+  .screen {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    overscroll-behavior: contain;
+  }
+  .screen::-webkit-scrollbar { display: none; }
+  .scroll { padding: 6px 18px 28px; }
+  .tabbar {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: rgba(9, 15, 27, .92);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(18px);
+    z-index: 20;
+  }
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 0 3px;
+    color: var(--muted-2);
+    font-size: 10px;
+    font-weight: 650;
+    position: relative;
+  }
+  .tab svg { width: 22px; height: 22px; }
+  .tab.active { color: var(--accent); }
+  .tab.active::before {
+    content: "";
+    position: absolute;
+    top: -9px;
+    width: 26px;
+    height: 3px;
+    border-radius: 99px;
+    background: var(--accent);
+    box-shadow: 0 0 12px rgba(79, 140, 255, .8);
+  }
+  .tab-badge {
+    position: absolute;
+    top: 1px;
+    right: calc(50% - 19px);
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 99px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 800;
+    display: grid;
+    place-items: center;
+    border: 2px solid #0b1220;
+  }
+  .eyebrow {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  h1 { font-size: 25px; line-height: 1.15; letter-spacing: -.6px; margin: 0; font-weight: 750; }
+  h2 { font-size: 15px; margin: 0; letter-spacing: -.2px; font-weight: 700; }
+  .sub { color: var(--muted); font-size: 12.5px; margin: 4px 0 0; line-height: 1.45; }
+  .row { display: flex; align-items: center; }
+  .between { justify-content: space-between; }
+  .gap8 { gap: 8px; }
+  .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 0 16px; }
+  .avatar-stack { display: flex; align-items: center; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 800; color: #07101d;
+    border: 2px solid var(--bg);
+    margin-left: -8px;
+  }
+  .avatar:first-child { margin-left: 0; }
+  .avatar.more { background: var(--surface-2); color: var(--muted); border-color: var(--bg); font-size: 9px; }
+  .searchbar {
+    width: 100%;
+    display: flex; align-items: center; gap: 10px;
+    height: 50px; padding: 0 15px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    color: var(--muted);
+    font-size: 13.5px;
+    text-align: left;
+    margin-bottom: 16px;
+  }
+  .searchbar svg { flex: 0 0 auto; color: var(--muted-2); }
+  .searchbar .shortcut { margin-left: auto; font-size: 10px; color: var(--muted-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+  .hero {
+    position: relative;
+    min-height: 196px;
+    border-radius: 24px;
+    overflow: hidden;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background:
+      radial-gradient(120% 130% at 100% 0%, rgba(125, 211, 252, .2), transparent 55%),
+      linear-gradient(135deg, #0b2a45 0%, #10395b 45%, #071420 100%);
+    border: 1px solid rgba(125, 211, 252, .16);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, .35);
+  }
+  .hero::after {
+    content: "S";
+    position: absolute;
+    right: -12px;
+    bottom: -58px;
+    font-size: 250px;
+    font-weight: 900;
+    color: rgba(186, 230, 253, .06);
+    line-height: 1;
+    pointer-events: none;
+  }
+  .hero-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 9.5px; font-weight: 800; letter-spacing: 1.4px; color: #bae6fd; text-transform: uppercase; }
+  .hero-tag .dot { width: 5px; height: 5px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 8px #38bdf8; }
+  .hero-title { font-size: 30px; font-weight: 850; letter-spacing: -1px; margin: 6px 0 2px; }
+  .hero-sub { color: #b6cbe0; font-size: 12px; }
+  .hero-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; position: relative; z-index: 1; }
+  .hero-progress { flex: 1; }
+  .hero-progress .bar { background: rgba(255, 255, 255, .16); }
+  .hero-progress .bar i { background: #7dd3fc; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 10px; color: #b6cbe0; margin-top: 6px; }
+  .playbtn {
+    width: 48px; height: 48px; border-radius: 50%;
+    background: #f8fafc; color: #0b1220;
+    display: grid; place-items: center;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .35);
+    flex: 0 0 auto;
+  }
+  .playbtn svg { margin-left: 2px; }
+  .section { margin-top: 22px; }
+  .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .section-head .link { color: var(--accent); font-size: 11.5px; font-weight: 700; }
+  .quick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+  .quick {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 17px;
+    padding: 12px 4px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    color: #cbd8ea; font-size: 10.5px; font-weight: 600;
+    transition: transform .15s ease, background .15s ease;
+  }
+  .quick:active { transform: scale(.96); background: var(--surface-2); }
+  .quick svg { color: var(--accent); }
+  .rail { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 8px; margin: 0 -2px; scrollbar-width: none; }
+  .rail::-webkit-scrollbar { display: none; }
+  .poster {
+    position: relative;
+    width: 112px;
+    height: 150px;
+    border-radius: 15px;
+    overflow: hidden;
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, .09);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .poster .poster-art {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    font-size: 25px; font-weight: 900; letter-spacing: -.5px;
+    color: rgba(255, 255, 255, .82);
+    text-shadow: 0 2px 20px rgba(0, 0, 0, .5);
+  }
+  .poster .poster-meta {
+    position: absolute; inset: auto 0 0 0;
+    padding: 24px 9px 9px;
+    background: linear-gradient(transparent, rgba(3, 7, 18, .92));
+    font-size: 10.5px; font-weight: 700; line-height: 1.2;
+  }
+  .poster .poster-meta span { display: block; color: #9fb0c8; font-size: 9px; font-weight: 500; margin-top: 2px; }
+  .poster .corner { position: absolute; top: 7px; right: 7px; background: rgba(3, 7, 18, .72); border: 1px solid rgba(255, 255, 255, .12); color: #dbe7f7; border-radius: 99px; padding: 2px 6px; font-size: 8px; font-weight: 700; }
+  .status-strip {
+    width: 100%;
+    margin-top: 20px;
+    display: flex; align-items: center; gap: 12px;
+    background: linear-gradient(135deg, rgba(52, 211, 153, .1), var(--surface));
+    border: 1px solid rgba(52, 211, 153, .18);
+    border-radius: 18px;
+    padding: 13px 14px;
+    text-align: left;
+  }
+  .status-strip .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px rgba(52, 211, 153, .12); flex: 0 0 auto; }
+  .status-strip strong { display: block; font-size: 12px; }
+  .status-strip span { display: block; color: var(--muted); font-size: 10.5px; margin-top: 2px; }
+  .status-strip .chev { margin-left: auto; color: var(--muted-2); }
+  .mini-orders { display: flex; flex-direction: column; gap: 8px; }
+  .mini-order { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 9px 11px; }
+  .mini-order .mini-poster { width: 30px; height: 38px; border-radius: 7px; flex: 0 0 auto; display: grid; place-items: center; font-size: 10px; font-weight: 800; }
+  .mini-order .info { flex: 1; min-width: 0; }
+  .mini-order .info strong { display: block; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini-order .info span { font-size: 10px; color: var(--muted); }
+  .mini-order .bar { width: 58px; }
+  .bar { height: 4px; border-radius: 99px; background: rgba(255, 255, 255, .09); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+  .bar i.bg-blue { background: var(--accent); }
+  .bar i.bg-green { background: var(--green); }
+  .bar i.bg-violet { background: var(--violet); }
+  .bar i.bg-amber { background: var(--amber); }
+  .segmented {
+    display: flex; gap: 3px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; margin: 16px 0 12px;
+  }
+  .segmented button {
+    flex: 1; height: 32px; border-radius: 10px;
+    font-size: 11.5px; font-weight: 700; color: var(--muted);
+  }
+  .segmented button.active { background: var(--surface-3); color: var(--text); box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+  .chips { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: 0 0 auto; height: 30px; padding: 0 11px;
+    border-radius: 99px; border: 1px solid var(--line);
+    background: transparent; color: var(--muted);
+    font-size: 10.5px; font-weight: 650;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .chip b { color: #cbd8ea; font-size: 10px; }
+  .chip.active { background: var(--accent-soft); border-color: rgba(79, 140, 255, .4); color: #a9c6ff; }
+  .chip.active b { color: #dbeafe; }
+  .order-list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding-bottom: 70px; }
+  .order-card { display: flex; gap: 11px; background: var(--surface); border: 1px solid var(--line); border-radius: 19px; padding: 12px; }
+  .thumb { width: 54px; height: 72px; border-radius: 11px; flex: 0 0 auto; display: grid; place-items: center; font-size: 16px; font-weight: 900; position: relative; overflow: hidden; }
+  .order-body { flex: 1; min-width: 0; }
+  .order-title { font-size: 13.5px; font-weight: 750; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .order-meta { color: var(--muted); font-size: 10px; margin-top: 2px; }
+  .order-status { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 650; margin-top: 7px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+  .blue { color: #93c5fd; } .dot.blue, .bg-blue { background: var(--accent); }
+  .green { color: #6ee7b7; } .dot.green, .bg-green { background: var(--green); }
+  .amber { color: #fcd34d; } .dot.amber, .bg-amber { background: var(--amber); }
+  .red { color: #fca5a5; } .dot.red, .bg-red { background: var(--red); }
+  .violet { color: #c4b5fd; } .dot.violet, .bg-violet { background: var(--violet); }
+  .order-card .bar { margin-top: 7px; height: 3px; }
+  .order-foot { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--muted-2); font-size: 9.5px; }
+  .order-foot .mini-avatar { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 7.5px; font-weight: 800; color: #07101d; }
+  .order-foot .link { margin-left: auto; color: var(--accent); font-size: 10px; font-weight: 700; }
+  .badge { font-size: 8.5px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; padding: 3px 6px; border-radius: 6px; flex: 0 0 auto; }
+  .badge.blue { background: var(--accent-soft); color: #93c5fd; }
+  .badge.violet { background: var(--violet-soft); color: #c4b5fd; }
+  .badge.amber { background: var(--amber-soft); color: #fcd34d; }
+  .badge.green { background: var(--green-soft); color: #6ee7b7; }
+  .history-list { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; }
+  .history-row { display: flex; align-items: center; gap: 10px; padding: 10px 11px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+  .history-row .hdate { font-size: 9px; color: var(--muted-2); width: 38px; flex: 0 0 auto; line-height: 1.3; }
+  .history-row .hinfo { flex: 1; min-width: 0; }
+  .history-row .hinfo strong { display: block; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .history-row .hinfo span { font-size: 9.5px; color: var(--muted); }
+  .history-row .check { color: var(--green); }
+  .fab {
+    position: absolute; right: 18px; bottom: 92px; z-index: 15;
+    width: 54px; height: 54px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: linear-gradient(160deg, #6ea3ff, #3b74e8);
+    color: #fff;
+    box-shadow: 0 14px 32px rgba(59, 116, 232, .48), 0 0 0 1px rgba(255, 255, 255, .16) inset;
+  }
+  .fab:active { transform: scale(.95); }
+  .quota-card {
+    display: flex; gap: 14px; align-items: center;
+    background: linear-gradient(140deg, rgba(79, 140, 255, .12), var(--surface));
+    border: 1px solid rgba(79, 140, 255, .2);
+    border-radius: 20px; padding: 14px; margin-top: 16px;
+  }
+  .gauge {
+    width: 74px; height: 74px; border-radius: 50%; flex: 0 0 auto;
+    background: conic-gradient(var(--accent) 0 90%, rgba(255, 255, 255, .08) 90% 100%);
+    display: grid; place-items: center;
+    box-shadow: 0 0 24px rgba(79, 140, 255, .18);
+  }
+  .gauge > div { width: 58px; height: 58px; border-radius: 50%; background: #101a2c; display: grid; place-items: center; text-align: center; }
+  .gauge strong { font-size: 15px; line-height: 1; display: block; }
+  .gauge span { font-size: 8px; color: var(--muted); display: block; margin-top: 2px; }
+  .quota-card h3 { margin: 0; font-size: 13px; }
+  .quota-card p { margin: 4px 0 0; font-size: 10.5px; color: var(--muted); line-height: 1.4; }
+  .quota-card .pill { display: inline-flex; align-items: center; gap: 4px; margin-top: 7px; font-size: 9px; color: #93c5fd; background: var(--accent-soft); padding: 3px 7px; border-radius: 99px; }
+  .sub-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .sub-row { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; padding: 9px 10px; }
+  .sub-row .thumb { width: 36px; height: 46px; border-radius: 8px; font-size: 10px; }
+  .sub-row .sinfo { flex: 1; min-width: 0; }
+  .sub-row .sinfo strong { display: block; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub-row .sinfo span { font-size: 9.5px; color: var(--muted); }
+  .pill-btn { height: 28px; padding: 0 10px; border-radius: 9px; background: var(--accent-soft); border: 1px solid rgba(79, 140, 255, .3); color: #a9c6ff; font-size: 10px; font-weight: 700; flex: 0 0 auto; }
+  .pill-btn.done { background: var(--green-soft); border-color: rgba(52, 211, 153, .3); color: #6ee7b7; }
+  .queue-card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 13px; margin-top: 12px; }
+  .queue-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 10.5px; color: #cbd8ea; border-bottom: 1px solid var(--line); }
+  .queue-item:last-of-type { border-bottom: 0; }
+  .queue-item .qdot { width: 5px; height: 5px; border-radius: 50%; background: var(--amber); }
+  .queue-item span { margin-left: auto; color: var(--muted-2); font-size: 9px; }
+  .btn-primary {
+    width: 100%; height: 40px; border-radius: 12px;
+    background: linear-gradient(160deg, #6ea3ff, #3b74e8);
+    color: #fff; font-size: 12px; font-weight: 750;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    box-shadow: 0 8px 20px rgba(59, 116, 232, .3);
+  }
+  .btn-primary.ghost { background: var(--surface-2); box-shadow: none; border: 1px solid var(--line-strong); color: #dbe7f7; }
+  .btn-primary:active { transform: scale(.985); }
+  .help { margin-top: 12px; border: 1px dashed var(--line-strong); border-radius: 15px; padding: 0 12px; }
+  .help summary { cursor: pointer; padding: 11px 0; font-size: 10.5px; color: var(--muted); font-weight: 650; list-style: none; }
+  .help summary::-webkit-details-marker { display: none; }
+  .help p { margin: 0 0 11px; font-size: 10px; line-height: 1.55; color: var(--muted); }
+  .hero-status {
+    display: flex; align-items: center; gap: 13px;
+    background: linear-gradient(135deg, rgba(52, 211, 153, .12), var(--surface));
+    border: 1px solid rgba(52, 211, 153, .18);
+    border-radius: 20px; padding: 15px; margin-top: 14px;
+  }
+  .hero-status .bigcheck { width: 42px; height: 42px; border-radius: 14px; background: var(--green-soft); color: var(--green); display: grid; place-items: center; flex: 0 0 auto; }
+  .hero-status strong { display: block; font-size: 13px; }
+  .hero-status span { display: block; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+  .mode-pill { display: inline-flex; align-items: center; gap: 5px; height: 27px; padding: 0 9px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); font-size: 9.5px; font-weight: 750; color: var(--muted); }
+  .mode-pill.admin { color: #c4b5fd; border-color: rgba(167, 139, 250, .3); background: var(--violet-soft); }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 19px; padding: 14px; margin-top: 10px; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .panel-head h2 { font-size: 13px; }
+  .panel-head .hint { font-size: 9.5px; color: var(--muted-2); }
+  .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .metric { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 9px; text-align: center; }
+  .metric strong { display: block; font-size: 15px; letter-spacing: -.3px; }
+  .metric span { display: block; font-size: 8.5px; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: .5px; }
+  .storage-list { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; }
+  .storage-row { display: grid; grid-template-columns: 92px 1fr 34px; align-items: center; gap: 8px; font-size: 9.5px; color: var(--muted); }
+  .storage-row .bar { height: 5px; }
+  .storage-row b { text-align: right; color: #cbd8ea; font-size: 9.5px; }
+  .service-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+  .service { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 8px 4px; text-align: center; }
+  .service .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin: 0 auto 5px; box-shadow: 0 0 6px rgba(52, 211, 153, .7); }
+  .service .sdot.amber { background: var(--amber); box-shadow: 0 0 6px rgba(251, 191, 36, .7); }
+  .service strong { display: block; font-size: 8.5px; font-weight: 700; color: #cbd8ea; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .service span { display: block; font-size: 7.5px; color: var(--muted-2); margin-top: 2px; }
+  .pc-card { display: flex; align-items: center; gap: 11px; }
+  .pc-icon { width: 38px; height: 38px; border-radius: 12px; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); flex: 0 0 auto; }
+  .pc-card .pcinfo { flex: 1; }
+  .pc-card strong { display: block; font-size: 12px; }
+  .pc-card span { display: block; font-size: 9.5px; color: var(--muted); margin-top: 2px; }
+  .pc-card .pill-btn { height: 30px; }
+  .import-row { display: flex; align-items: center; gap: 9px; font-size: 10px; color: var(--muted); }
+  .import-row .bar { flex: 1; height: 5px; }
+  .import-row b { color: #cbd8ea; font-size: 9.5px; }
+  .admin-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .admin-actions .btn-primary { height: 36px; font-size: 10.5px; }
+  .family-note { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 11px 12px; border-radius: 14px; background: rgba(79, 140, 255, .07); border: 1px solid rgba(79, 140, 255, .14); color: var(--muted); font-size: 9.5px; line-height: 1.5; }
+  .mode-family .admin-only { display: none !important; }
+  .sheet-overlay {
+    position: absolute; inset: 0; z-index: 50;
+    background: rgba(2, 6, 16, .66);
+    backdrop-filter: blur(3px);
+    display: flex; align-items: flex-end;
+    animation: fade .18s ease;
+  }
+  .sheet {
+    width: 100%;
+    max-height: 84%;
+    background: #0d1626;
+    border: 1px solid var(--line-strong);
+    border-bottom: 0;
+    border-radius: 26px 26px 0 0;
+    padding: 10px 18px calc(22px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    animation: rise .24s cubic-bezier(.2, .8, .2, 1);
+    box-shadow: 0 -20px 50px rgba(0, 0, 0, .45);
+  }
+  .sheet::-webkit-scrollbar { display: none; }
+  .handle { width: 38px; height: 4px; background: var(--line-strong); border-radius: 99px; margin: 0 auto 14px; }
+  .sheet h2 { font-size: 17px; }
+  .iconbtn { width: 30px; height: 30px; border-radius: 50%; background: var(--surface-2); color: var(--muted); display: grid; place-items: center; flex: 0 0 auto; }
+  .searchfield { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; border-radius: 13px; background: var(--surface-2); border: 1px solid var(--line); margin: 14px 0 10px; }
+  .searchfield input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; font-size: 12.5px; color: var(--text); }
+  .searchfield input::placeholder { color: var(--muted-2); }
+  .result { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .result:last-child { border-bottom: 0; }
+  .result .thumb { width: 38px; height: 50px; border-radius: 8px; font-size: 10px; }
+  .result .rinfo { flex: 1; min-width: 0; }
+  .result .rinfo strong { display: block; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result .rinfo span { display: block; font-size: 9.5px; color: var(--muted); margin-top: 2px; }
+  .result .pill-btn { height: 30px; min-width: 58px; }
+  .empty { text-align: center; padding: 28px 10px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .toast {
+    position: absolute; left: 50%; bottom: 92px; transform: translate(-50%, 8px);
+    z-index: 70;
+    background: #1f7a3d; color: #fff;
+    padding: 9px 13px; border-radius: 11px;
+    font-size: 11px; font-weight: 650; line-height: 1.35;
+    max-width: 320px; width: max-content;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+    opacity: 0; pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.error { background: #8b1e1e; }
+  .field-label { display: block; font-size: 10px; font-weight: 700; color: var(--muted); margin: 12px 0 6px; }
+  .text-input { width: 100%; height: 42px; border-radius: 11px; border: 1px solid var(--line-strong); background: var(--surface-2); padding: 0 12px; outline: 0; font-size: 12.5px; }
+  .text-input:focus { border-color: rgba(79, 140, 255, .6); }
+  .member-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .member-row:last-child { border-bottom: 0; }
+  .member-row .avatar { margin: 0; width: 34px; height: 34px; }
+  .member-row strong { display: block; font-size: 12px; }
+  .member-row span { display: block; font-size: 9.5px; color: var(--muted); margin-top: 1px; }
+  .mode-option { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); margin-top: 8px; text-align: left; }
+  .mode-option.active { border-color: rgba(79, 140, 255, .45); background: var(--accent-soft); }
+  .mode-option .mo-icon { width: 34px; height: 34px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; color: var(--accent); flex: 0 0 auto; }
+  .mode-option strong { display: block; font-size: 11.5px; }
+  .mode-option span { display: block; font-size: 9.5px; color: var(--muted); margin-top: 2px; }
+  .mode-option .check { margin-left: auto; color: var(--accent); }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes rise { from { transform: translateY(22px); opacity: .6; } to { transform: translateY(0); opacity: 1; } }
+  @media (max-width: 640px) {
+    body { padding: 0; display: block; }
+    .phone { width: 100%; height: 100dvh; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
+    .app { border-radius: 0; }
+  }
+</style>
+</head>
+<body class="mode-family">
+<div class="phone">
+  <div class="app" id="app">
+    <div class="statusbar">
+      <span>9:41</span>
+      <span class="icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M1.5 3.8a9.5 9.5 0 0 1 13 0M4 6.4a6 6 0 0 1 8 0M6.5 9a2.8 2.8 0 0 1 3 0"/></svg>
+        <svg width="24" height="11" viewBox="0 0 24 11" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x=".6" y=".6" width="20" height="9.8" rx="2.8"/><rect x="2.2" y="2.2" width="15" height="6.6" rx="1.4" fill="currentColor" stroke="none"/><path d="M22.4 3.6v3.8" stroke-linecap="round"/></svg>
+      </span>
+    </div>
+    <main class="screen" id="screen"></main>
+    <nav class="tabbar" id="tabbar"></nav>
+    <div id="sheet-root"></div>
+    <div class="toast" id="toast"></div>
+  </div>
+</div>
+<script>
+  const POSTERS = {
+    suits:  { bg: 'linear-gradient(155deg,#0b2a45,#155e85 48%,#071420)', label: 'SUITS' },
+    buddy:  { bg: 'linear-gradient(155deg,#3b1d0f,#9a3412 52%,#1c0f08)', label: 'BUDDY' },
+    bleach: { bg: 'linear-gradient(155deg,#2e1065,#7c3aed 55%,#12061f)', label: 'BLEACH' },
+    jack:   { bg: 'linear-gradient(155deg,#0c1a12,#166534 52%,#052e16)', label: 'JACK' },
+    duna:   { bg: 'linear-gradient(155deg,#3f2a12,#b45309 52%,#1c1206)', label: 'DUNA' },
+    mente:  { bg: 'linear-gradient(155deg,#0c4a6e,#0ea5e9 52%,#082f49)', label: 'MENTE' },
+    wicked: { bg: 'linear-gradient(155deg,#3b0764,#a21caf 50%,#1a052e)', label: 'WICKED' },
+    ainda:  { bg: 'linear-gradient(155deg,#1e293b,#64748b 55%,#0f172a)', label: 'AINDA' },
+    flow:   { bg: 'linear-gradient(155deg,#052e16,#16a34a 50%,#021a0c)', label: 'FLOW' },
+    furiosa:{ bg: 'linear-gradient(155deg,#431407,#ea580c 50%,#1c0a02)', label: 'FURIOSA' },
+    tlou:   { bg: 'linear-gradient(155deg,#111827,#4b5563 52%,#030712)', label: 'TLOU' },
+    arcane: { bg: 'linear-gradient(155deg,#0c4a6e,#0891b2 52%,#082f49)', label: 'ARCANE' }
+  };
+  const FAMILY = [
+    { id: 'w', name: 'Wagner', initial: 'W', color: '#7dd3fc' },
+    { id: 'm', name: 'Mari', initial: 'M', color: '#f9a8d4' },
+    { id: 'l', name: 'Lucas', initial: 'L', color: '#86efac' }
+  ];
+  const SEARCH_DATA = [
+    { id: 'duna', title: 'Duna: Parte 2', year: 2024, kind: 'Filme', poster: 'duna', owned: false },
+    { id: 'mente', title: 'Divertida Mente 2', year: 2024, kind: 'Filme', poster: 'mente', owned: false },
+    { id: 'wicked', title: 'Wicked', year: 2024, kind: 'Filme', poster: 'wicked', owned: false },
+    { id: 'ainda', title: 'Ainda Estou Aqui', year: 2024, kind: 'Filme', poster: 'ainda', owned: false },
+    { id: 'flow', title: 'Flow', year: 2024, kind: 'Filme', poster: 'flow', owned: false },
+    { id: 'furiosa', title: 'Furiosa', year: 2024, kind: 'Filme', poster: 'furiosa', owned: false },
+    { id: 'suits', title: 'Suits', year: 2011, kind: 'Série', poster: 'suits', owned: true },
+    { id: 'bleach', title: 'Bleach', year: 2004, kind: 'Anime', poster: 'bleach', owned: true },
+    { id: 'jack', title: 'O Estranho Mundo de Jack', year: 1993, kind: 'Filme', poster: 'jack', owned: true },
+    { id: 'tlou', title: 'The Last of Us', year: 2023, kind: 'Série', poster: 'tlou', owned: false },
+    { id: 'arcane', title: 'Arcane', year: 2021, kind: 'Anime', poster: 'arcane', owned: false }
+  ];
+  const SERVICES = [
+    { name: 'Jellyfin', detail: 'ok', ok: true },
+    { name: 'Seerr', detail: 'ok', ok: true },
+    { name: 'Radarr', detail: 'ok', ok: true },
+    { name: 'Sonarr', detail: 'ok', ok: true },
+    { name: 'Bazarr', detail: 'ok', ok: true },
+    { name: 'qBittorrent', detail: 'ok', ok: true },
+    { name: 'Prowlarr', detail: 'ok', ok: true },
+    { name: 'Indexer', detail: 'degradado', ok: false }
+  ];
+  const params = new URLSearchParams(location.search);
+  const state = {
+    screen: params.get('screen') || 'home',
+    mode: params.get('mode') === 'admin' ? 'admin' : 'family',
+    ordersView: 'active',
+    filter: 'all',
+    requested: new Set(),
+    pc: 'offline',
+    queueRunning: false,
+    subsSearched: new Set(),
+    toastTimer: null,
+    requests: [
+      { id: 'buddy', title: 'Buddy', year: '2026', kind: 'Filme', poster: 'buddy', profile: 'Dublado', status: 'downloading', progress: 62, by: 'm', statusText: 'Chegando em ~20 min' },
+      { id: 'bleach', title: 'Bleach', year: 'T17 • E41', kind: 'Anime', poster: 'bleach', profile: 'Dublado', status: 'queued', progress: 0, by: 'l', statusText: 'Na fila — buscando release' },
+      { id: 'suits', title: 'Suits', year: 'T3 • 4 de 12', kind: 'Série', poster: 'suits', profile: 'Legendado', status: 'downloading', progress: 33, by: 'w', statusText: 'Baixando 4 de 12 episódios' },
+      { id: 'jack', title: 'O Estranho Mundo de Jack', year: '1993', kind: 'Filme', poster: 'jack', profile: 'Dublado', status: 'ready', progress: 100, by: 'w', statusText: 'Pronto para assistir' }
+    ],
+    history: [
+      { title: 'O Estranho Mundo de Jack', date: '23 nov', kind: 'Filme', poster: 'jack', by: 'Wagner' },
+      { title: 'Suits • T2', date: '19 nov', kind: 'Série', poster: 'suits', by: 'Wagner' },
+      { title: 'Divertida Mente 2', date: '12 nov', kind: 'Filme', poster: 'mente', by: 'Mari' },
+      { title: 'Bleach • T16', date: '08 nov', kind: 'Anime', poster: 'bleach', by: 'Lucas' }
+    ],
+    subs: [
+      { title: 'Suits', ep: 'T3 • E4', poster: 'suits' },
+      { title: 'Bleach', ep: 'T17 • E41', poster: 'bleach' },
+      { title: 'Buddy', ep: 'Filme', poster: 'buddy' },
+      { title: 'O Estranho Mundo de Jack', ep: 'Filme', poster: 'jack' }
+    ]
+  };
+
+  const ICONS = {
+    home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+    film: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/>',
+    cc: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 10.5a2.5 2.5 0 1 0 0 3M17 10.5a2.5 2.5 0 1 0 0 3"/>',
+    house: '<path d="M4 11 12 4l8 7"/><path d="M6 10v10h12V10"/><path d="M10 20v-6h4v6"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+    play: '<path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    power: '<path d="M12 3v9"/><path d="M7 6a8 8 0 1 0 10 0"/>',
+    chevron: '<path d="m9 6 6 6-6 6"/>',
+    check: '<path d="m5 12 4 4L19 6"/>',
+    clock: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+    alert: '<path d="M12 3 2 21h20L12 3z"/><path d="M12 9v5M12 18h.01"/>',
+    user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+    download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
+    refresh: '<path d="M20 7v5h-5"/><path d="M20 12a8 8 0 1 1-2.3-5.7L20 8"/>',
+    x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+    tv: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+    chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
+    storage: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+    monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1v4H21a1.7 1.7 0 0 0-1.6 1z"/>',
+    back: '<path d="M15 18l-6-6 6-6"/>'
+  };
+  function ic(name, size) {
+    size = size || 20;
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
+  }
+  function member(id) { return FAMILY.find(function (m) { return m.id === id; }) || FAMILY[0]; }
+  function avatar(m, extra) {
+    return '<span class="avatar ' + (extra || '') + '" style="background:' + m.color + '">' + m.initial + '</span>';
+  }
+  function poster(key, title, sub, cls, corner) {
+    var p = POSTERS[key] || POSTERS.suits;
+    return '<div class="poster ' + (cls || '') + '" style="background:' + p.bg + '">' +
+      '<div class="poster-art">' + p.label + '</div>' +
+      (corner ? '<span class="corner">' + corner + '</span>' : '') +
+      (title ? '<div class="poster-meta">' + title + (sub ? '<span>' + sub + '</span>' : '') + '</div>' : '') +
+      '</div>';
+  }
+  function thumb(key, cls) {
+    var p = POSTERS[key] || POSTERS.suits;
+    return '<div class="thumb ' + (cls || '') + '" style="background:' + p.bg + '">' + p.label.slice(0, 2) + '</div>';
+  }
+  function posterMini(key) {
+    var p = POSTERS[key] || POSTERS.suits;
+    return '<span class="mini-poster" style="background:' + p.bg + '">' + p.label.slice(0, 1) + '</span>';
+  }
+  function toast(msg, ok) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast show' + (ok === false ? ' error' : '');
+    clearTimeout(state.toastTimer);
+    state.toastTimer = setTimeout(function () { el.className = 'toast'; }, 3200);
+  }
+
+  function go(screen) {
+    state.screen = screen;
+    render();
+    var sc = document.getElementById('screen');
+    if (sc) sc.scrollTop = 0;
+  }
+  function setMode(mode) {
+    state.mode = mode;
+    document.body.className = mode === 'admin' ? 'mode-admin' : 'mode-family';
+    closeSheet();
+    render();
+    toast(mode === 'admin' ? 'Modo administrador ativado' : 'Modo família ativado');
+  }
+  function setOrdersView(view) { state.ordersView = view; render(); }
+  function setFilter(f) { state.filter = f; render(); }
+  function setSearchKind(k) { state.searchKind = k; renderSearchResults(document.getElementById('search-input') ? document.getElementById('search-input').value : ''); }
+
+  function tabbar() {
+    var items = [
+      { id: 'home', label: 'Início', icon: 'home' },
+      { id: 'orders', label: 'Pedidos', icon: 'film', badge: activeCount() },
+      { id: 'subs', label: 'Legendas', icon: 'cc' },
+      { id: 'casa', label: 'Casa', icon: 'house' }
+    ];
+    document.getElementById('tabbar').innerHTML = items.map(function (it) {
+      return '<button class="tab ' + (state.screen === it.id ? 'active' : '') + '" onclick="go(\'' + it.id + '\')" aria-label="' + it.label + '">' +
+        ic(it.icon, 22) + (it.badge ? '<span class="tab-badge">' + it.badge + '</span>' : '') +
+        '<span>' + it.label + '</span></button>';
+    }).join('');
+  }
+  function activeCount() {
+    return state.requests.filter(function (r) { return r.status !== 'ready'; }).length;
+  }
+
+  function homeScreen() {
+    var watches = [
+      { key: 'jack', title: 'O Estranho Mundo de Jack', sub: '1993 • Dublado', corner: 'NOVO' },
+      { key: 'bleach', title: 'Bleach', sub: 'T17 • Dublado', corner: 'T17' },
+      { key: 'buddy', title: 'Buddy', sub: '2026 • Dublado', corner: 'FILME' },
+      { key: 'suits', title: 'Suits', sub: 'T3 • Legendado', corner: 'SÉRIE' }
+    ];
+    var active = state.requests.filter(function (r) { return r.status !== 'ready'; }).slice(0, 2);
+    return '<div class="scroll">' +
+      '<header class="topbar">' +
+        '<div><div class="eyebrow">Casa Mídia</div><h1>Olá, família</h1><p class="sub">Terça, 24 de novembro</p></div>' +
+        '<button class="avatar-stack" onclick="openProfile()" aria-label="Perfis e modo">' +
+          FAMILY.map(function (m) { return avatar(m); }).join('') + '<span class="avatar more">+2</span>' +
+        '</button>' +
+      '</header>' +
+      '<button class="searchbar" onclick="openSearch()">' + ic('search', 19) + 'O que você quer assistir?<span class="shortcut">Buscar</span></button>' +
+      '<section class="hero">' +
+        '<div><span class="hero-tag"><span class="dot"></span>Continuar assistindo</span>' +
+        '<div class="hero-title">Suits</div><div class="hero-sub">T3 • E4 — Dividir para conquistar</div></div>' +
+        '<div class="hero-bottom"><div class="hero-progress">' +
+          '<div class="bar"><i style="width:62%"></i></div>' +
+          '<div class="progress-label"><span>62% assistido</span><span>18 min restantes</span></div>' +
+        '</div><button class="playbtn" onclick="openJellyfin()" aria-label="Continuar no Jellyfin">' + ic('play', 24) + '</button></div>' +
+      '</section>' +
+      '<div class="quick-grid">' +
+        '<button class="quick" onclick="openSearch()">' + ic('film', 21) + 'Pedir filme</button>' +
+        '<button class="quick" onclick="openSearch()">' + ic('tv', 21) + 'Pedir série</button>' +
+        '<button class="quick" onclick="go(\'subs\')">' + ic('cc', 21) + 'Legendas</button>' +
+        '<button class="quick" onclick="go(\'casa\')">' + ic('power', 21) + 'Ligar PC</button>' +
+      '</div>' +
+      '<section class="section"><div class="section-head"><h2>Novidades para a família</h2><button class="link" onclick="openCatalog()">Ver tudo</button></div>' +
+        '<div class="rail">' + watches.map(function (w) { return poster(w.key, w.title, w.sub, '', w.corner); }).join('') + '</div>' +
+      '</section>' +
+      '<button class="status-strip" onclick="go(\'casa\')">' +
+        '<span class="pulse"></span><div><strong>Tudo funcionando</strong><span>7 serviços online • armazenamento em 71%</span></div>' + ic('chevron', 18) +
+      '</button>' +
+      '<section class="section"><div class="section-head"><h2>Chegando para a família</h2><button class="link" onclick="go(\'orders\')">Pedidos</button></div>' +
+        '<div class="mini-orders">' + active.map(function (r) {
+          return '<button class="mini-order" onclick="go(\'orders\')">' + posterMini(r.poster) +
+            '<div class="info"><strong>' + r.title + '</strong><span>' + r.statusText + '</span></div>' +
+            '<div class="bar"><i style="width:' + Math.max(r.progress, 8) + '%"></i></div>' + ic('chevron', 15) + '</button>';
+        }).join('') + '</div>' +
+      '</section>' +
+      '<div class="family-note">' + ic('user', 16) + '<span>Os pedidos são compartilhados com a família. Cada pessoa vê o que pediu e quando chega.</span></div>' +
+    '</div>';
+  }
+
+  function statusMeta(r) {
+    if (r.status === 'ready') return { cls: 'green', dot: 'green', text: r.statusText };
+    if (r.status === 'error') return { cls: 'red', dot: 'red', text: r.statusText };
+    if (r.status === 'pending') return { cls: 'amber', dot: 'amber', text: r.statusText };
+    if (r.status === 'queued') return { cls: 'amber', dot: 'amber', text: r.statusText };
+    return { cls: 'blue', dot: 'blue', text: r.statusText };
+  }
+  function orderCard(r) {
+    var m = member(r.by);
+    var s = statusMeta(r);
+    return '<article class="order-card">' + thumb(r.poster) +
+      '<div class="order-body"><div class="row between gap8"><span class="order-title">' + r.title + '</span><span class="badge ' + (r.profile === 'Dublado' ? 'blue' : 'violet') + '">' + r.profile + '</span></div>' +
+      '<div class="order-meta">' + r.year + ' • ' + r.kind + '</div>' +
+      '<div class="order-status ' + s.cls + '"><span class="dot ' + s.dot + '"></span>' + s.text + '</div>' +
+      (r.progress > 0 && r.progress < 100 ? '<div class="bar"><i style="width:' + r.progress + '%"></i></div>' : '') +
+      '<div class="order-foot"><span class="mini-avatar" style="background:' + m.color + '">' + m.initial + '</span>pedido por ' + m.name +
+      '<button class="link" onclick="openOrder(\'' + r.id + '\')">Detalhes</button></div></div></article>';
+  }
+  function ordersScreen() {
+    var counts = {
+      all: state.requests.length,
+      downloading: state.requests.filter(function (r) { return r.status === 'downloading'; }).length,
+      queued: state.requests.filter(function (r) { return r.status === 'queued' || r.status === 'pending'; }).length,
+      ready: state.requests.filter(function (r) { return r.status === 'ready'; }).length
+    };
+    var filters = [
+      ['all', 'Todos', counts.all], ['downloading', 'Baixando', counts.downloading],
+      ['queued', 'Na fila', counts.queued], ['ready', 'Prontos', counts.ready]
+    ];
+    var list = state.requests.filter(function (r) {
+      if (state.filter === 'all') return true;
+      if (state.filter === 'queued') return r.status === 'queued' || r.status === 'pending';
+      return r.status === state.filter;
+    });
+    var active = state.ordersView === 'active';
+    return '<div class="scroll">' +
+      '<header class="topbar"><div><div class="eyebrow">Pedidos da família</div><h1>Pedidos</h1><p class="sub">' + (active ? 'Acompanhe o que está chegando' : 'Tudo o que já chegou') + '</p></div>' +
+        '<button class="mode-pill ' + (state.mode === 'admin' ? 'admin' : '') + '" onclick="openProfile()">' + ic(state.mode === 'admin' ? 'settings' : 'user', 13) + (state.mode === 'admin' ? 'Admin' : 'Família') + '</button>' +
+      '</header>' +
+      '<div class="segmented"><button class="' + (active ? 'active' : '') + '" onclick="setOrdersView(\'active\')">Ativos</button><button class="' + (!active ? 'active' : '') + '" onclick="setOrdersView(\'history\')">Histórico</button></div>' +
+      (active ? (
+        '<div class="chips">' + filters.map(function (f) {
+          return '<button class="chip ' + (state.filter === f[0] ? 'active' : '') + '" onclick="setFilter(\'' + f[0] + '\')">' + f[1] + ' <b>' + f[2] + '</b></button>';
+        }).join('') + '</div>' +
+        '<div class="order-list">' + (list.length ? list.map(orderCard).join('') : '<div class="empty">Nada por aqui ainda.<br>Toque em + para pedir algo.</div>') + '</div>' +
+        '<div class="admin-only"><div class="admin-actions"><button class="btn-primary" onclick="openSearch(\'series\')">' + ic('plus', 15) + 'Adicionar série</button><button class="btn-primary ghost" onclick="openSearch()">' + ic('search', 15) + 'Buscar no Seerr</button></div></div>' +
+        '<div class="fab" onclick="openSearch()" aria-label="Fazer um pedido">' + ic('plus', 25) + '</div>'
+      ) : (
+        '<div class="history-list">' + state.history.map(function (h) {
+          return '<div class="history-row"><span class="hdate">' + h.date + '<br>2026</span>' + thumb(h.poster) +
+            '<div class="hinfo"><strong>' + h.title + '</strong><span>' + h.kind + ' • ' + h.by + '</span></div>' + ic('check', 16).replace('<svg', '<svg class="check"') + '</div>';
+        }).join('') + '</div>' +
+        '<div class="admin-only"><button class="btn-primary ghost" style="margin-top:12px" onclick="toast(\'Arquivados carregados apagados\')">' + ic('refresh', 15) + 'Apagar arquivados carregados</button></div>'
+      )) +
+    '</div>';
+  }
+
+  function subsScreen() {
+    var done = state.subs.filter(function (s) { return state.subsSearched.has(s.title + s.ep); }).length;
+    return '<div class="scroll">' +
+      '<header class="topbar"><div><div class="eyebrow">Bazarr + OpenSubtitles</div><h1>Legendas</h1><p class="sub">Português para a família</p></div>' +
+        '<button class="mode-pill ' + (state.mode === 'admin' ? 'admin' : '') + '" onclick="openProfile()">' + (state.mode === 'admin' ? 'Admin' : 'Família') + '</button>' +
+      '</header>' +
+      '<div class="quota-card"><div class="gauge"><div><strong>' + (18 - done) + '</strong><span>de 20</span></div></div>' +
+        '<div><h3>OpenSubtitles hoje</h3><p>Restam ' + (18 - done) + ' downloads. A quota renova todo dia.</p><span class="pill">' + ic('refresh', 11) + 'Renovação diária</span></div></div>' +
+      '<section class="section"><div class="section-head"><h2>Faltando legendas</h2><span class="sub">' + state.subs.length + ' títulos</span></div>' +
+        '<div class="sub-list">' + state.subs.map(function (s) {
+          var key = s.title + s.ep;
+          var busy = state.subsSearched.has(key);
+          return '<div class="sub-row">' + thumb(s.poster) + '<div class="sinfo"><strong>' + s.title + '</strong><span>' + s.ep + ' • PT-BR</span></div>' +
+            '<button class="pill-btn ' + (busy ? 'done' : '') + '" onclick="findSub(\'' + key.replace(/'/g, "\\'") + '\')">' + (busy ? 'Na fila' : 'Buscar') + '</button></div>';
+        }).join('') + '</div>' +
+      '</section>' +
+      '<div class="queue-card"><div class="row between"><strong style="font-size:12px">Fila de legendas</strong><span class="badge amber">' + (state.queueRunning ? 'Executando' : '2 itens') + '</span></div>' +
+        '<div style="margin-top:6px"><div class="queue-item"><span class="qdot"></span>Suits • T3 E4 • PT-BR<span>aguardando</span></div><div class="queue-item"><span class="qdot"></span>Buddy • Filme • PT-BR<span>aguardando</span></div></div>' +
+        '<button class="btn-primary" style="margin-top:10px" onclick="runQueue()">' + ic('play', 15) + (state.queueRunning ? 'Executando…' : 'Executar fila agora') + '</button>' +
+        '<p class="sub" style="font-size:9.5px;margin-top:8px">A fila roda no servidor. Pode fechar o app — ela continua.</p>' +
+      '</div>' +
+      '<div class="admin-only"><div class="admin-actions"><button class="btn-primary ghost" onclick="toast(\'Buscando pendentes de todos os títulos…\')">' + ic('search', 15) + 'Buscar pendentes</button><button class="btn-primary ghost" onclick="toast(\'Sincronizando legendas existentes…\')">' + ic('refresh', 15) + 'Sincronizar</button></div></div>' +
+      '<details class="help"><summary>Como funciona</summary><p>O app consulta a API do Bazarr pelo servidor. A chave do OpenSubtitles fica no servidor e nunca é enviada para o celular. Se a quota acabar, a fila espera a renovação.</p></details>' +
+    '</div>';
+  }
+
+  function casaScreen() {
+    var admin = state.mode === 'admin';
+    return '<div class="scroll">' +
+      '<header class="topbar"><div><div class="eyebrow">Status do servidor</div><h1>Casa</h1><p class="sub">Raspberry Pi 4 • 8 GB</p></div>' +
+        '<button class="mode-pill ' + (admin ? 'admin' : '') + '" onclick="openProfile()">' + ic(admin ? 'settings' : 'user', 13) + (admin ? 'Admin' : 'Família') + '</button>' +
+      '</header>' +
+      '<div class="hero-status"><div class="bigcheck">' + ic('check', 22) + '</div><div><strong>Tudo funcionando</strong><span>7 de 8 serviços online • atualizado agora</span></div></div>' +
+      '<div class="panel"><div class="panel-head"><h2>Raspberry Pi</h2><span class="hint">12 d no ar</span></div>' +
+        '<div class="metric-grid"><div class="metric"><strong>23%</strong><span>CPU</span></div><div class="metric"><strong>61%</strong><span>RAM</span></div><div class="metric"><strong>52°</strong><span>Temp.</span></div></div>' +
+        '<div class="storage-list">' +
+          '<div class="storage-row"><span>Sistema (microSD)</span><div class="bar"><i class="bg-blue" style="width:54%"></i></div><b>54%</b></div>' +
+          '<div class="storage-row"><span>Filmes</span><div class="bar"><i class="bg-green" style="width:71%"></i></div><b>71%</b></div>' +
+          '<div class="storage-row"><span>Séries</span><div class="bar"><i class="bg-violet" style="width:63%"></i></div><b>63%</b></div>' +
+          '<div class="storage-row"><span>Animes</span><div class="bar"><i class="bg-amber" style="width:22%"></i></div><b>22%</b></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="panel"><div class="panel-head"><h2>Serviços</h2><span class="hint">' + (admin ? 'detalhes' : 'resumo') + '</span></div>' +
+        (admin ? '<div class="service-grid">' + SERVICES.map(function (s) {
+          return '<div class="service"><span class="sdot ' + (s.ok ? '' : 'amber') + '"></span><strong>' + s.name + '</strong><span>' + s.detail + '</span></div>';
+        }).join('') + '</div>' : '<div class="row gap8"><span class="dot green"></span><span style="font-size:11px;color:#cbd8ea">Jellyfin, Seerr e downloads estão online</span></div>') +
+        '<div class="admin-only"><button class="btn-primary ghost" style="margin-top:10px;height:36px;font-size:10.5px" onclick="toast(\'Verificando todos os serviços…\')">' + ic('refresh', 14) + 'Verificar agora</button></div>' +
+      '</div>' +
+      (admin ? '<div class="admin-actions"><button class="btn-primary" onclick="openSearch(\'series\')">' + ic('plus', 15) + 'Adicionar série</button><button class="btn-primary ghost" onclick="toast(\'Verificando releases PT-BR…\')">' + ic('cc', 15) + 'Verificar PT-BR</button></div>' : '') +
+      '<div class="panel"><div class="pc-card"><div class="pc-icon">' + ic('monitor', 19) + '</div><div class="pcinfo"><strong>PC da casa</strong><span>' + (state.pc === 'online' ? 'Online • pronto para jogar' : state.pc === 'waking' ? 'Ligando…' : 'Desligado • Wake-on-LAN') + '</span></div>' +
+        (state.pc === 'online' ? '<span class="badge green">Online</span>' : '<button class="pill-btn" onclick="openWake()">Ligar PC</button>') + '</div></div>' +
+      '<div class="panel"><div class="panel-head"><h2>Importações</h2><span class="hint">agora</span></div><div class="import-row"><span>3 arquivos</span><div class="bar"><i class="bg-green" style="width:42%"></i></div><b>42%</b></div><p class="sub" style="font-size:9.5px;margin-top:7px">Buddy (2026) • Suits T3E4 • Bleach T17E41</p></div>' +
+      '<div class="family-note">' + ic('lock', 16) + '<span>' + (admin ? 'Você está no modo administrador. As ações de gestão ficam visíveis apenas neste modo.' : 'O modo família esconde as ferramentas de administração. Troque para Admin no topo para gerenciar serviços.') + '</span></div>' +
+    '</div>';
+  }
+
+  function openSheet(html) {
+    document.getElementById('sheet-root').innerHTML = '<div class="sheet-overlay" onclick="if(event.target===this)closeSheet()"><div class="sheet">' + html + '</div></div>';
+  }
+  function closeSheet() { document.getElementById('sheet-root').innerHTML = ''; }
+
+  function openSearch(kind) {
+    state.searchKind = kind || 'all';
+    openSheet('<div class="handle"></div><div class="row between"><h2>' + (kind === 'series' ? 'Adicionar série' : 'Pedir para a família') + '</h2><button class="iconbtn" onclick="closeSheet()" aria-label="Fechar">' + ic('x', 16) + '</button></div>' +
+      '<p class="sub">' + (kind === 'series' ? 'Busque no Sonarr e escolha o perfil.' : 'Busque no Seerr e envie um pedido.') + '</p>' +
+      '<div class="searchfield">' + ic('search', 17) + '<input id="search-input" placeholder="Filme, série ou anime" oninput="filterSearch(this.value)" autofocus></div>' +
+      '<div class="chips" style="margin-bottom:4px"><button class="chip ' + (state.searchKind === 'all' ? 'active' : '') + '" onclick="setSearchKind(\'all\')">Tudo</button><button class="chip ' + (state.searchKind === 'series' ? 'active' : '') + '" onclick="setSearchKind(\'series\')">Séries e animes</button></div>' +
+      '<div id="search-results"></div>');
+    renderSearchResults('');
+  }
+  function filterSearch(q) { renderSearchResults(q || ''); }
+  function renderSearchResults(q) {
+    var el = document.getElementById('search-results');
+    if (!el) return;
+    var query = (q || '').toLowerCase();
+    var list = SEARCH_DATA.filter(function (it) {
+      var kindOk = state.searchKind !== 'series' || it.kind !== 'Filme';
+      return kindOk && it.title.toLowerCase().indexOf(query) >= 0;
+    });
+    if (!list.length) {
+      el.innerHTML = '<div class="empty">Nenhum título encontrado.<br>Tente outro nome.</div>';
+      return;
+    }
+    el.innerHTML = list.map(function (it) {
+      var requested = state.requested.has(it.id) || state.requests.some(function (r) { return r.id === it.id; });
+      var action = it.owned ? '<button class="pill-btn done" onclick="openJellyfin()">Assistir</button>' :
+        '<button class="pill-btn" onclick="requestTitle(\'' + it.id + '\')">' + (requested ? 'Na fila' : (state.mode === 'admin' && state.searchKind === 'series' ? 'Adicionar' : 'Pedir')) + '</button>';
+      return '<div class="result">' + thumb(it.poster) + '<div class="rinfo"><strong>' + it.title + '</strong><span>' + it.year + ' • ' + it.kind + (it.owned ? ' • Na biblioteca' : '') + '</span></div>' + action + '</div>';
+    }).join('');
+  }
+  function requestTitle(id) {
+    var item = SEARCH_DATA.find(function (x) { return x.id === id; });
+    if (!item) return;
+    if (state.requested.has(id) || state.requests.some(function (r) { return r.id === id; })) { toast('Já está nos pedidos da família'); return; }
+    state.requested.add(id);
+    state.requests.unshift({
+      id: item.id, title: item.title, year: String(item.year), kind: item.kind, poster: item.poster,
+      profile: 'Dublado', status: state.mode === 'admin' ? 'queued' : 'pending',
+      progress: 0, by: 'w', statusText: state.mode === 'admin' ? 'Na fila — buscando release' : 'Aguardando aprovação'
+    });
+    renderSearchResults(document.getElementById('search-input') ? document.getElementById('search-input').value : '');
+    tabbar(); render();
+    toast('Pedido enviado! Avisamos quando chegar.');
+  }
+  function openJellyfin() { closeSheet(); toast('Abrindo no Jellyfin…'); }
+  function openCatalog() { toast('Abrindo catálogo do Jellyfin…'); }
+
+  function openOrder(id) {
+    var r = state.requests.find(function (x) { return x.id === id; });
+    if (!r) return;
+    var m = member(r.by);
+    var s = statusMeta(r);
+    openSheet('<div class="handle"></div><div class="row between"><h2>' + r.title + '</h2><button class="iconbtn" onclick="closeSheet()">' + ic('x', 16) + '</button></div>' +
+      '<p class="sub">' + r.year + ' • ' + r.kind + ' • ' + r.profile + '</p>' +
+      '<div class="order-status ' + s.cls + '" style="margin-top:14px"><span class="dot ' + s.dot + '"></span>' + s.text + '</div>' +
+      (r.progress > 0 && r.progress < 100 ? '<div class="bar" style="margin-top:12px"><i style="width:' + r.progress + '%"></i></div>' : '') +
+      '<div class="member-row" style="margin-top:10px">' + avatar(m) + '<div><strong>Pedido por ' + m.name + '</strong><span>Pedidos da família são compartilhados</span></div></div>' +
+      '<div class="admin-only"><div class="admin-actions"><button class="btn-primary" onclick="toast(\'Busca iniciada no perfil atual\')">' + ic('search', 15) + 'Buscar agora</button><button class="btn-primary ghost" onclick="toast(\'Trocado para Legendado e busca iniciada\')">' + ic('refresh', 15) + 'Buscar original</button></div></div>' +
+      '<button class="btn-primary ghost" style="margin-top:10px" onclick="closeSheet();toast(\'Você será avisado quando chegar\')">' + ic('clock', 15) + 'Avisar quando chegar</button>');
+  }
+
+  function openProfile() {
+    var admin = state.mode === 'admin';
+    openSheet('<div class="handle"></div><div class="row between"><h2>Perfis e modo</h2><button class="iconbtn" onclick="closeSheet()">' + ic('x', 16) + '</button></div>' +
+      '<p class="sub">A família usa o modo Família. O modo Admin libera as ferramentas de gestão.</p>' +
+      '<button class="mode-option ' + (!admin ? 'active' : '') + '" onclick="setMode(\'family\')"><span class="mo-icon">' + ic('user', 17) + '</span><span><strong>Modo família</strong><span>Pedir, assistir e acompanhar</span></span>' + (!admin ? '<span class="check">' + ic('check', 16) + '</span>' : '') + '</button>' +
+      '<button class="mode-option ' + (admin ? 'active' : '') + '" onclick="setMode(\'admin\')"><span class="mo-icon">' + ic('settings', 17) + '</span><span><strong>Modo administrador</strong><span>Serviços, perfis e legendas</span></span>' + (admin ? '<span class="check">' + ic('check', 16) + '</span>' : '') + '</button>' +
+      '<div style="margin-top:16px">' + FAMILY.map(function (m) { return '<div class="member-row">' + avatar(m) + '<div><strong>' + m.name + '</strong><span>' + (m.id === 'w' ? 'Administrador' : 'Membro da família') + '</span></div></div>'; }).join('') + '</div>');
+  }
+
+  function openWake() {
+    openSheet('<div class="handle"></div><div class="row between"><h2>Ligar PC da casa</h2><button class="iconbtn" onclick="closeSheet()">' + ic('x', 16) + '</button></div>' +
+      '<p class="sub">O PC precisa estar com Wake-on-LAN habilitado. A senha é a mesma do dashboard.</p>' +
+      '<label class="field-label" for="wake-pass">Senha do gaming</label><input class="text-input" id="wake-pass" type="password" placeholder="Digite a senha" onkeydown="if(event.key===\'Enter\')wakePC()">' +
+      '<button class="btn-primary" style="margin-top:12px" onclick="wakePC()">' + ic('power', 16) + 'Enviar magic packet</button>' +
+      '<p class="sub" style="font-size:9.5px;margin-top:10px">No modo remoto, o app usa o endpoint público com senha. Na LAN, o botão funciona sem senha.</p>');
+  }
+  function wakePC() {
+    var input = document.getElementById('wake-pass');
+    if (!input || !input.value) { toast('Digite a senha do gaming', false); return; }
+    state.pc = 'waking';
+    closeSheet(); render();
+    toast('PC ligando… pode levar até 30 s');
+    setTimeout(function () { state.pc = 'online'; render(); toast('PC online!'); }, 2200);
+  }
+
+  function findSub(key) {
+    if (state.subsSearched.has(key)) { toast('Já está na fila de legendas'); return; }
+    state.subsSearched.add(key);
+    render();
+    toast('Buscando legenda…');
+  }
+  function runQueue() {
+    if (state.queueRunning) { toast('A fila já está executando'); return; }
+    state.queueRunning = true;
+    render();
+    toast('Fila iniciada — 2 legendas');
+    setTimeout(function () { state.queueRunning = false; render(); toast('Fila concluída'); }, 2600);
+  }
+
+  function render() {
+    var screens = { home: homeScreen, orders: ordersScreen, subs: subsScreen, casa: casaScreen };
+    document.getElementById('screen').innerHTML = (screens[state.screen] || homeScreen)();
+    document.body.className = state.mode === 'admin' ? 'mode-admin' : 'mode-family';
+    tabbar();
+  }
+  render();
+</script>
+</body>
+</html>

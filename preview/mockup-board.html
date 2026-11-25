@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Casa Mídia — prévia do app</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(900px 600px at 12% -10%, rgba(79, 140, 255, .16), transparent 60%),
+      radial-gradient(800px 500px at 100% 110%, rgba(52, 211, 153, .09), transparent 60%),
+      #05080f;
+    color: #f1f5f9;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    padding: 30px 40px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  header { text-align: center; margin-bottom: 22px; }
+  .brand { font-size: 26px; font-weight: 800; letter-spacing: -.7px; }
+  .brand span { color: #4f8cff; }
+  header p { margin: 6px 0 0; color: #8a9bb4; font-size: 13px; }
+  .screens { display: flex; gap: 24px; align-items: flex-start; justify-content: center; }
+  figure { margin: 0; }
+  .device {
+    width: 390px;
+    height: 844px;
+    border: 8px solid #1e293b;
+    border-radius: 48px;
+    overflow: hidden;
+    background: #070d18;
+    box-shadow: 0 40px 80px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .06) inset;
+  }
+  iframe { width: 100%; height: 100%; border: 0; background: #070d18; }
+  figcaption { text-align: center; margin-top: 12px; font-size: 12px; font-weight: 650; color: #8a9bb4; }
+  figcaption b { color: #cbd8ea; font-weight: 700; }
+  footer { margin-top: 16px; color: #64748b; font-size: 11px; }
+  footer b { color: #8a9bb4; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">Casa <span>Mídia</span></div>
+    <p>Prévia do app mobile para a família • o desktop continua no Homepage</p>
+  </header>
+  <div class="screens">
+    <figure>
+      <div class="device"><iframe src="mobile-app.html?screen=home&mode=family" title="Início"></iframe></div>
+      <figcaption><b>Início</b> — assistir, pedir e ver o status</figcaption>
+    </figure>
+    <figure>
+      <div class="device"><iframe src="mobile-app.html?screen=orders&mode=family" title="Pedidos"></iframe></div>
+      <figcaption><b>Pedidos</b> — o que está chegando</figcaption>
+    </figure>
+    <figure>
+      <div class="device"><iframe src="mobile-app.html?screen=subs&mode=family" title="Legendas"></iframe></div>
+      <figcaption><b>Legendas</b> — quota, pendências e fila</figcaption>
+    </figure>
+    <figure>
+      <div class="device"><iframe src="mobile-app.html?screen=casa&mode=admin" title="Casa"></iframe></div>
+      <figcaption><b>Casa</b> — saúde do servidor (modo admin)</figcaption>
+    </figure>
+  </div>
+  <footer>Abra <b>preview/mobile-app.html</b> para navegar de verdade — abas, pedidos, fila e Wake-on-LAN são clicáveis.</footer>
+</body>
+</html>

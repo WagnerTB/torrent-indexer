@@ -43,8 +43,9 @@ Compose: `<STACK_ROOT>/docker-compose.yml` (projeto Compose
 | `jellyfin` | `jellyfin/jellyfin` | `8096` (remoto) | `<CONFIG_ROOT>/jellyfin` + `jellyfin-cache` |
 | `stremio-server` | `stremio/server` | `11470`, `12470` (remoto) | `<MEDIA_ROOT>/stremio-server` |
 | `homepage` | `ghcr.io/gethomepage/homepage` | `3000` (remoto, modo adaptativo) | `<CONFIG_ROOT>/homepage` |
-| `gaming-agent` | `python:3.12-alpine` (script local) | `<LAN_IP>:8099` (privado, LAN) e `8098` (público: status/WOL com senha) | `<CONFIG_ROOT>/gaming-agent` |
+| `gaming-agent` | `python:3.12-alpine` (script local) | `<LAN_IP>:8100` (privado, LAN) e `8098` (público: status/WOL com senha) | `<CONFIG_ROOT>/gaming-agent` |
 | `media-agent` | `python:3.12-alpine` (script local) | `8097` (LAN + Tailscale, allowlist de IP) | `<CONFIG_ROOT>/media-agent` |
+| `media-bff` | `media-agent:local` (mesmo `/app`) | `https://<BFF_HOST>` (Cloudflare Tunnel) e `<LAN_IP>:8091` (app na LAN) / `<LAN_IP>:8092` (admin, só LAN) | volume `media-bff-state` |
 | `media-gateway` | `python:3.12-alpine` (script local) | interna (`8099`, rede `media`) | `<CONFIG_ROOT>/media-gateway` |
 | `radarr` | `lscr.io/linuxserver/radarr` | `<LAN_IP>:7878` | `<CONFIG_ROOT>/radarr` |
 | `seerr` | `seerr/seerr` (sucessor do Jellyseerr) | `5055` (remoto) | `<CONFIG_ROOT>/seerr` |
@@ -53,8 +54,10 @@ Compose: `<STACK_ROOT>/docker-compose.yml` (projeto Compose
 Acesso: **8096 (Jellyfin), 5055 (Seerr), 8080 (indexer/UI), 3000 (Homepage),
 11470/12470 (Stremio), 8098 (gaming: status/WOL com senha) e 8097
 (media-agent: Pedidos/Legendas)** ficam acessíveis pelo Tailscale; Radarr,
-Sonarr, Prowlarr, Bazarr, qBittorrent, métricas, o **8099 privado** do
+Sonarr, Prowlarr, Bazarr, qBittorrent, métricas, o **8100 privado** do
 gaming-agent e o `media-gateway` ficam presos ao IP `<LAN_IP>` (LAN). O
+**8099** do BFF fica em `127.0.0.1` e só sai pelo Cloudflare Tunnel (`<BFF_HOST>`); o **8091** atende o app na LAN e o **8092**
+de admin fica preso à LAN. O
 Homepage detecta o host: no Tailscale esconde os cards de gestão, mas mantém as
 abas Pedidos/Legendas via media-agent.
 
@@ -74,7 +77,7 @@ containers unhealthy; o watchdog cobre travamento total do sistema. Instalação
 Desde a migração de 2026-11-23 o stack usa três filesystems (detalhes em
 [STORAGE_MIGRATION_2026-11-23.md](STORAGE_MIGRATION_2026-11-23.md)):
 
-- Configs: `<CONFIG_ROOT>` (no Pi, `/srv/PiMedia/docker`).
+- Configs: `<CONFIG_ROOT>` (definido no `.env`; no Pi fica em `/srv/...`).
 - Mídia (2 TB): `<MEDIA_ROOT>` montado como `/media` nos containers.
 - Downloads (640 GB): `<DOWNLOAD_ROOT>` montado como `/media/downloads` em
   qBittorrent, Sonarr, Radarr, Bazarr, Jellyfin e media-agent (o mesmo caminho
@@ -225,7 +228,7 @@ primeira busca.
   `gate/go` → `promobr.online` → `x.gd` e não expõe o magnet de forma
   automatizável; continua fora do Prowlarr.
 - Os proxies do Prowlarr (`FlareSolverr` e `Solverr`) apontavam para
-  `http://192.168.1.10:8191/`; foram corrigidos para `http://solvearr:8191/`
+  `http://<LAN_IP>:8191/`; foram corrigidos para `http://solvearr:8191/`
   com timeout de 180s. Isso recuperou o 1337x e permitiu adicionar o UIndex.
 
 ## 5. Torrent-indexer: mudanças no Torznab
@@ -563,7 +566,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
   - botão **Ligar PC** dentro do card **PC Casa** (status/WOL).
 - `custom.js` detecta o host:
   - acessado por `<LAN_IP>`, `localhost` ou `127.0.0.1` = **modo local**:
-    todos os cards, as abas Início/Pedidos/Legendas e o Gaming; o WOL usa o 8099
+    todos os cards, as abas Início/Pedidos/Legendas e o Gaming; o WOL usa o 8100
     privado, sem senha.
   - acessado por `<TAILSCALE_IP>` (ou outro host) = **modo remoto**: esconde os
     cards de gestão (Radarr, Sonarr, Bazarr, Prowlarr, qBittorrent), o grupo
@@ -590,7 +593,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
 
 ## 10. Gaming agent (PC da casa)
 
-- Container `gaming-agent` (host network), só WOL/status: `8099` privado
+- Container `gaming-agent` (host network), só WOL/status: `8100` privado
   (**LAN only**, `LISTEN_HOST=<LAN_IP>`) e `8098` público (LAN + Tailscale).
 - Script: `<CONFIG_ROOT>/gaming-agent/agent.py` (fora do Git); monta
   apenas o diretório `/app`. Não acessa Bazarr, Radarr, Sonarr ou Seerr.
@@ -757,7 +760,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
 - Exposição pelo Tailscale: **Jellyfin 8096, Seerr 5055, torrent-indexer 8080,
   Homepage 3000, Stremio 11470/12470 e gaming 8098** (status/WOL com senha).
 - LAN-only (bind em `<LAN_IP>`): Radarr 7878, Sonarr 8989, Prowlarr 9696,
-  Bazarr 6767, qBittorrent WebUI 8082, métricas 8081, gaming-agent **8099
+  Bazarr 6767, qBittorrent WebUI 8082, métricas 8081, gaming-agent **8100
   privado** e `media-gateway` (este nem publica porta). O peer do qBittorrent
   (6881) fica aberto para torrents.
 - O Homepage detecta o host: acesso por `<LAN_IP>` mostra tudo; acesso pelo
@@ -767,7 +770,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
 - A chave do Bazarr saiu do `custom.js` e vive em `.bazarr_key` no servidor; as
   demais chaves ficam no `services.yaml` e são usadas pelo servidor do
   Homepage, não pelo navegador.
-- O gaming-agent tem dois listeners, só de WOL/status: o 8099 privado (LAN,
+- O gaming-agent tem dois listeners, só de WOL/status: o 8100 privado (LAN,
   sem auth) e o 8098 público, que expõe `/gaming/status` (sem IP/MAC) e
   `/gaming/wake` (senha em `GAMING_PASSWORD` no `.env`, limite de 5 falhas/min).
 - O media-agent (`8097`) aceita LAN e Tailscale via `ALLOWED_NETWORKS` e não
@@ -813,7 +816,7 @@ Bazarr em `http://<LAN_IP>:6767`, config
    1337x/YTS/UIndex. Commit feito junto com o handler.
 9. **Compose versionado**: o `deploy/raspberry/docker-compose.yml` foi
    atualizado em 2026-11-02 (media-agent com build, ffmpeg, `/media:ro` e
-   128 MB); no Pi o build context é `/srv/PiMedia/docker/media-agent`.
+   128 MB); no Pi o build context é `<CONFIG_ROOT>/media-agent`.
 10. **UI**: etapas 1, 0.5, 2, 3, 4, 5, 6 e 7 concluídas. O estado da
     sub-aba/filtros na URL e o tema claro seguem opcionais.
 10. Itens órfãos de `/media/downloads` e `/media/docker` no banco do Jellyfin;
@@ -974,4 +977,4 @@ curl -s -H "X-API-KEY: <BAZARR_API_KEY>" \
 - Chave do Bazarr movida para `.bazarr_key` no servidor; `custom.js` sem segredo.
 - Gaming público: 8098 expõe só `/gaming/status` (sem IP/MAC) e
   `/gaming/wake` com `X-Gaming-Password`; senha em `GAMING_PASSWORD` no `.env`
-  e limite de 5 falhas/min. O 8099 privado continua LAN-only.
+  e limite de 5 falhas/min. O 8100 privado continua LAN-only.

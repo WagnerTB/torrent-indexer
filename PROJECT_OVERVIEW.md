@@ -351,10 +351,10 @@ com `&` e `%20`.
 - Exposição pelo Tailscale: Jellyfin 8096, Seerr 5055, torrent-indexer 8080,
   Homepage 3000, Stremio 11470, **gaming 8098** (status/WOL com senha) e
   **media-agent 8097** (Pedidos/Legendas). Radarr/Sonarr/Prowlarr/Bazarr/
-  qBittorrent/métricas e o **8099 privado** do gaming-agent ficam presos ao IP
+  qBittorrent/métricas e o **8100 privado** do gaming-agent ficam presos ao IP
   `<LAN_IP>` (LAN). O Homepage detecta o host: no modo remoto esconde os
   cards de gestão, mas mantém PC Casa e as abas Pedidos/Legendas.
-- O WOL fica no card **PC Casa**: no modo local usa o 8099 sem senha; no modo
+- O WOL fica no card **PC Casa**: no modo local usa o 8100 sem senha; no modo
   remoto usa o 8098 e pede a senha definida em `GAMING_PASSWORD` no `.env`
   (`.gaming_password` é fallback legado).
 - Jellyfin: o realtime não funciona no mount FUSE/NTFS-3G; o scan agendado roda
@@ -407,7 +407,7 @@ Arquivos importantes alterados/adicionados nesta etapa:
   segurança.
 
 No Pi, também foram atualizados: `gaming-agent/agent.py` (fora do Git; só
-WOL/status, 8099 privada/8098 pública), `media-agent/media_agent.py` (versionado
+WOL/status, 8100 privada/8098 pública), `media-agent/media_agent.py` (versionado
 em `deploy/raspberry/media-agent/`; Pedidos e Legendas: `/arr/*`, `/sonarr/*`,
 `/bazarr`, quota, porta 8097), `media-gateway/gateway.py` (proxy Torznab),
 `.bazarr_key`, `GAMING_PASSWORD` no `.env` e o `custom.js` do Homepage (modo
