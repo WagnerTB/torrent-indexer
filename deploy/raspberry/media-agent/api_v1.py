@@ -84,6 +84,19 @@ SESSION_MARGIN = 300  # renova 5 min antes do cookie do Seerr morrer
 
 log = logging.getLogger("api_v1")
 
+# Gêneros do discover: (id TMDB para filme, id TMDB para série).
+DISCOVER_GENRES = {
+    "action": (28, 10759),
+    "comedy": (35, 35),
+    "drama": (18, 18),
+    "scifi": (878, 10765),
+    "animation": (16, 16),
+    "horror": (27, None),
+    "romance": (10749, 10749),
+    "documentary": (99, 99),
+    "mystery": (9648, 9648),
+}
+
 
 class ApiError(Exception):
     def __init__(self, status: int, code: str, message: str = "", retry_after: float | None = None):
@@ -1095,31 +1108,83 @@ def make_handler(services: Services, public: bool):
             self._send(200, self._seerr_result(status, text, data))
 
         def _discover(self) -> None:
-            """Recomendações famosas e com pelo menos 1 ano (nota/votos altos)."""
+            """Recomendações; padrão: famosas, 1+ ano, nota >= 7 e >= 1000 votos."""
             identity = self._identity()
             cookie = self._seerr_cookie(identity)
+            query = self._query()
+
+            def _int(name):
+                try:
+                    return int((query.get(name) or [""])[0])
+                except (TypeError, ValueError):
+                    return None
+
+            def _float(name, default):
+                try:
+                    return float((query.get(name) or [""])[0])
+                except (TypeError, ValueError):
+                    return default
+
+            media_type = (query.get("media_type") or ["all"])[0].lower()
+            if media_type not in ("movie", "tv"):
+                media_type = "all"
+            genre = (query.get("genre") or [""])[0].strip().lower()
+            year_min = _int("year_min")
+            year_max = _int("year_max")
+            min_rating = _float("min_rating", 7.0)
+            min_votes = _int("min_votes") or 1000
+            sort = (query.get("sort") or ["popular"])[0].lower()
+            page = max(_int("page") or 1, 1)
+
+            sort_by = "vote_average.desc" if sort == "rating" else "popularity.desc"
+            default_lte = (
+                datetime.now(timezone.utc) - timedelta(days=365)
+            ).strftime("%Y-%m-%d")
+            date_gte = f"{year_min}-01-01" if year_min else None
+            date_lte = f"{year_max}-12-31" if year_max else default_lte
+
+            cache_key = (
+                f"{media_type}|{genre}|{year_min}|{year_max}|"
+                f"{min_rating}|{min_votes}|{sort}|{page}"
+            )
             now = time.time()
             with discover_cache_lock:
-                cached = discover_cache.get("data")
+                cached = discover_cache.get(cache_key)
                 if cached and cached[0] > now:
                     return self._send(200, cached[1])
 
-            limite = (
-                datetime.now(timezone.utc) - timedelta(days=365)
-            ).strftime("%Y-%m-%d")
-            itens = []
-            for kind, endpoint, date_param in (
-                ("movie", "/api/v1/discover/movies", "primaryReleaseDateLte"),
-                ("tv", "/api/v1/discover/tv", "firstAirDateLte"),
-            ):
-                path = (
-                    f"{endpoint}?sortBy=popularity.desc&voteAverageGte=7"
-                    f"&voteCountGte=1000&{date_param}={limite}&page=1"
+            genre_movie, genre_tv = DISCOVER_GENRES.get(genre, (None, None))
+            kinds = []
+            if media_type in ("movie", "all"):
+                kinds.append(
+                    ("movie", "/api/v1/discover/movies", "primaryRelease", genre_movie)
                 )
+            if media_type in ("tv", "all"):
+                kinds.append(("tv", "/api/v1/discover/tv", "firstAir", genre_tv))
+
+            itens = []
+            total_pages = 1
+            for kind, endpoint, prefix, genre_id in kinds:
+                if genre and genre_id is None:
+                    continue
+                params = [
+                    f"sortBy={sort_by}",
+                    f"voteAverageGte={min_rating}",
+                    f"voteCountGte={min_votes}",
+                    f"page={page}",
+                ]
+                if date_gte:
+                    params.append(f"{prefix}DateGte={date_gte}")
+                if date_lte:
+                    params.append(f"{prefix}DateLte={date_lte}")
+                if genre_id:
+                    params.append(f"withGenres={genre_id}")
+                path = f"{endpoint}?{'&'.join(params)}"
                 status, text, data = services.seerr.call(cookie, "GET", path)
                 if status != 200 or not isinstance(data, dict):
                     continue
-                for result in (data.get("results") or [])[:12]:
+                total_pages = max(total_pages, int(data.get("totalPages") or 1))
+                for result in data.get("results") or []:
                     if not isinstance(result, dict):
                         continue
                     itens.append({
@@ -1145,8 +1210,8 @@ def make_handler(services: Services, public: bool):
                     misto.append(series[idx])
 
             # O discover (sem language) vem em inglês; o metadata do Seerr
-            # devolve título/overview no idioma da instância (pt-BR).
-            selecionados = misto[:12]
+            # preenche mediaInfo e o que faltar. Cache de 10 min.
+            selecionados = misto[:20]
             for item in selecionados:
                 meta = self._seerr_metadata(
                     cookie, item["mediaType"], item["id"]
@@ -1169,9 +1234,14 @@ def make_handler(services: Services, public: bool):
                     item["voteAverage"] = meta.get("voteAverage")
                 item["mediaInfo"] = meta.get("mediaInfo") or item.get("mediaInfo")
 
-            payload = {"ok": True, "items": selecionados}
+            payload = {
+                "ok": True,
+                "items": selecionados,
+                "page": page,
+                "total_pages": total_pages,
+            }
             with discover_cache_lock:
-                discover_cache["data"] = (now + 600, payload)
+                discover_cache[cache_key] = (now + 600, payload)
             self._send(200, payload)
 
         def _create_request(self) -> None:
