@@ -1170,24 +1170,57 @@ def make_handler(services: Services, public: bool):
             for kind, endpoint, prefix, genre_id in kinds:
                 if genre and genre_id is None:
                     continue
-                params = [
-                    f"sortBy={sort_by}",
-                    f"voteAverageGte={min_rating}",
-                    f"voteCountGte={min_votes}",
-                    f"page={page}",
-                ]
-                if date_gte:
-                    params.append(f"{prefix}DateGte={date_gte}")
-                if date_lte:
-                    params.append(f"{prefix}DateLte={date_lte}")
-                if genre_id:
-                    params.append(f"withGenres={genre_id}")
-                path = f"{endpoint}?{'&'.join(params)}"
+                if genre:
+                    base_endpoint = (
+                        "/api/v1/discover/movies/genre/"
+                        if kind == "movie"
+                        else "/api/v1/discover/tv/genre/"
+                    )
+                    path = f"{base_endpoint}{genre_id}?page={page}&language=pt-BR"
+                else:
+                    params = [
+                        f"sortBy={sort_by}",
+                        f"voteAverageGte={min_rating}",
+                        f"voteCountGte={min_votes}",
+                        f"page={page}",
+                    ]
+                    if date_gte:
+                        params.append(f"{prefix}DateGte={date_gte}")
+                    if date_lte:
+                        params.append(f"{prefix}DateLte={date_lte}")
+                    path = f"{endpoint}?{'&'.join(params)}"
                 status, text, data = services.seerr.call(cookie, "GET", path)
                 if status != 200 or not isinstance(data, dict):
                     continue
                 total_pages = max(total_pages, int(data.get("totalPages") or 1))
-                for result in data.get("results") or []:
+                results = data.get("results") or []
+                if genre:
+                    # O endpoint por gênero não aceita nota/votos/data; filtra aqui.
+                    filtrados = []
+                    for result in results:
+                        if not isinstance(result, dict):
+                            continue
+                        nota = result.get("voteAverage") or 0
+                        votos = result.get("voteCount") or 0
+                        if nota < min_rating or votos < min_votes:
+                            continue
+                        lancamento = (
+                            result.get("releaseDate")
+                            or result.get("firstAirDate")
+                            or ""
+                        )
+                        if date_lte and lancamento and lancamento > date_lte:
+                            continue
+                        if date_gte and lancamento and lancamento < date_gte:
+                            continue
+                        filtrados.append(result)
+                    if sort == "rating":
+                        filtrados.sort(
+                            key=lambda r: (r.get("voteAverage") or 0),
+                            reverse=True,
+                        )
+                    results = filtrados
+                for result in results:
                     if not isinstance(result, dict):
                         continue
                     itens.append({
