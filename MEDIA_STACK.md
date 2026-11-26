@@ -735,8 +735,9 @@ Bazarr em `http://<LAN_IP>:6767`, config
   `/media/movies/Buddy (2026)/...mkv`, mas o Jellyfin ficou com `MovieCount 0`
   até um refresh manual. O refresh importou Buddy e “O Estranho Mundo de Jack” e
   iniciou o watcher de `/media/movies`; antes ele só observava `/media/Suits`.
-- O token de API usado nos scripts é lido da tabela `Devices` do banco do
-  Jellyfin; não documentar o valor.
+- O token de API do hook fica em `/config/scripts/.jellyfin_key` (chave
+  `MediaImportHook` na tabela `ApiKeys`); não documentar o valor. No Jellyfin
+  12+ o hook usa `Authorization: MediaBrowser Token="$KEY"`.
 - Backups do `options.xml` da biblioteca em
   `root/default/Séries/options.xml.bak.*`.
 - Atualizado para **12.4.0** em 2026-11-26 (imagem
@@ -952,6 +953,8 @@ docker logs --tail 30 media-media-bff-1
 - Plugin File Transformation removido antes da migração (não estava em uso).
 - `media-bff` ajustado para `Authorization: MediaBrowser Token="..."`;
   `test_api_v1.py` atualizado (67 testes).
+- Hooks `jellyfin-refresh.sh` do Radarr/Sonarr migrados para o header novo e
+  testados com eventos reais.
 
 ### 2026-11-25
 
