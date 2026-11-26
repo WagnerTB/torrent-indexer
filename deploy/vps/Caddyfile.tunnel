@@ -1,0 +1,15 @@
+# Modo tunnel: o cloudflared entrega HTTP em caddy:8080.
+# O TLS é terminado na Cloudflare; por isso X-Forwarded-Proto é forçado para https.
+:8080 {
+	@jellyfin host jellyfin.{$DOMAIN}
+	handle @jellyfin {
+		reverse_proxy 10.8.0.2:8096 {
+			flush_interval -1
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

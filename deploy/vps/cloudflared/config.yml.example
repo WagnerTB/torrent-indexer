@@ -1,0 +1,9 @@
+# Opcional: túnel gerenciado localmente.
+# O modo recomendado neste deploy é o token no .env (dashboard).
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: jellyfin.example.com
+    service: http://caddy:8080
+  - service: http_status:404

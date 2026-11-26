@@ -1,0 +1,10 @@
+[Interface]
+Address = __VPS_WG_IP__/24
+ListenPort = __WG_PORT__
+PrivateKey = __VPS_PRIVATE_KEY__
+
+[Peer]
+# Pi
+PublicKey = __PI_PUBLIC_KEY__
+PresharedKey = __PSK__
+AllowedIPs = __PI_WG_IP__/32

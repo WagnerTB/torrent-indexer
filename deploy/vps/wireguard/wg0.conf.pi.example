@@ -1,0 +1,11 @@
+[Interface]
+Address = __PI_WG_IP__/32
+PrivateKey = __PI_PRIVATE_KEY__
+
+[Peer]
+# VPS (Oracle)
+PublicKey = __VPS_PUBLIC_KEY__
+PresharedKey = __PSK__
+Endpoint = __VPS_PUBLIC_IP__:__WG_PORT__
+AllowedIPs = __WG_SUBNET__
+PersistentKeepalive = 25

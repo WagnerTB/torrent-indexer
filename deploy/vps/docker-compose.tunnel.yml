@@ -1,0 +1,33 @@
+name: media-vps
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "2"
+
+services:
+  caddy:
+    image: caddy:2
+    container_name: media-vps-caddy
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./Caddyfile.tunnel:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *default-logging
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: media-vps-cloudflared
+    restart: unless-stopped
+    depends_on:
+      - caddy
+    env_file: .env
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${TUNNEL_TOKEN}"]
+    logging: *default-logging
+
+volumes:
+  caddy_data:
+  caddy_config:

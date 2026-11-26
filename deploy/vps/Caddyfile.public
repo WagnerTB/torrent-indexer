@@ -1,0 +1,18 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Modo public: DNS A "jellyfin" -> IP do VPS, Proxy status = DNS only (nuvem cinza).
+# O Caddy emite o certificado Let's Encrypt e faz proxy para o Jellyfin do Pi via WireGuard.
+jellyfin.{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy 10.8.0.2:8096 {
+		flush_interval -1
+		header_up X-Forwarded-Proto https
+	}
+}
+
+# Opcional: se um dia mover o BFF para este VPS, descomente e rode o BFF em 127.0.0.1:8099.
+# bff.{$DOMAIN} {
+# 	reverse_proxy 127.0.0.1:8099
+# }

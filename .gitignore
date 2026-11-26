@@ -23,6 +23,11 @@ state/
 __pycache__/
 *.pyc
 
+# VPS deploy (WireGuard keys, Cloudflare credentials, env)
+deploy/vps/.env
+deploy/vps/wireguard/generated/
+deploy/vps/cloudflared/*.json
+
 # Homepage custom.js build
 deploy/homepage/node_modules/
 deploy/homepage/dist/
