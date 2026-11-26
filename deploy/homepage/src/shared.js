@@ -3,6 +3,7 @@ const LOCAL_HOSTS = ['192.168.1.10', 'localhost', '127.0.0.1'];
 export const REMOTE = !LOCAL_HOSTS.includes(location.hostname);
 export const SERVICE_HOST = REMOTE ? location.hostname : '192.168.1.10';
 export const MEDIA = 'http://' + SERVICE_HOST + ':8097';
+export const ADMIN = 'http://' + SERVICE_HOST + ':8093';
 const REMOTE_CARDS = {
   Jellyfin: [8096, '/'],
   Seerr: [5055, '/'],

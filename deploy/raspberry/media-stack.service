@@ -20,7 +20,7 @@ ExecStart=/usr/bin/docker compose up -d --no-build sonarr bazarr jellyfin
 ExecStart=/usr/bin/sleep 8
 ExecStart=/usr/bin/docker compose up -d --no-build radarr seerr homepage
 ExecStart=/usr/bin/sleep 5
-ExecStart=/usr/bin/docker compose up -d --no-build gaming-agent media-agent
+ExecStart=/usr/bin/docker compose up -d --no-build gaming-agent media-agent media-bff media-gateway admin-agent docker-socket-proxy autoheal
 ExecStop=/usr/bin/docker compose stop
 
 [Install]

@@ -47,6 +47,8 @@ Compose: `<STACK_ROOT>/docker-compose.yml` (projeto Compose
 | `media-agent` | `python:3.12-alpine` (script local) | `8097` (LAN + Tailscale, allowlist de IP) | `<CONFIG_ROOT>/media-agent` |
 | `media-bff` | `media-agent:local` (mesmo `/app`) | `https://<BFF_HOST>` (Cloudflare Tunnel) e `<LAN_IP>:8091` (app na LAN) / `<LAN_IP>:8092` (admin, só LAN) | volume `media-bff-state` |
 | `media-gateway` | `python:3.12-alpine` (script local) | interna (`8099`, rede `media`) | `<CONFIG_ROOT>/media-gateway` |
+| `docker-socket-proxy` | `tecnativa/docker-socket-proxy` | interna (`2375`, rede `admin-internal`) | proxy restrito do Docker; só o `admin-agent` acessa |
+| `admin-agent` | `admin-agent:local` | `<LAN_IP>:8093` (LAN only) | login dedicado; lista/start/stop/restart dos containers; auditoria em `<CONFIG_ROOT>/admin-agent/state` |
 | `radarr` | `lscr.io/linuxserver/radarr` | `<LAN_IP>:7878` | `<CONFIG_ROOT>/radarr` |
 | `seerr` | `seerr/seerr` (sucessor do Jellyseerr) | `5055` (remoto) | `<CONFIG_ROOT>/seerr` |
 | `autoheal` | `willfarrell/autoheal` | interna | reinicia containers marcados com `autoheal=true` quando ficam unhealthy |
@@ -55,7 +57,8 @@ Acesso: **8096 (Jellyfin), 5055 (Seerr), 8080 (indexer/UI), 3000 (Homepage),
 11470/12470 (Stremio), 8098 (gaming: status/WOL com senha) e 8097
 (media-agent: Pedidos/Legendas)** ficam acessíveis pelo Tailscale; Radarr,
 Sonarr, Prowlarr, Bazarr, qBittorrent, métricas, o **8100 privado** do
-gaming-agent e o `media-gateway` ficam presos ao IP `<LAN_IP>` (LAN). O
+gaming-agent, o `media-gateway` e o `admin-agent` (**8093**) ficam presos ao IP
+`<LAN_IP>` (LAN). O
 **8099** do BFF fica em `127.0.0.1` e só sai pelo Cloudflare Tunnel (`<BFF_HOST>`); o **8091** atende o app na LAN e o **8092**
 de admin fica preso à LAN. O
 Homepage detecta o host: no Tailscale esconde os cards de gestão, mas mantém as
@@ -591,6 +594,23 @@ Bazarr em `http://<LAN_IP>:6767`, config
   expostos na LAN e no Tailscale; os demais serviços de gestão continuam
   presos ao IP da LAN.
 
+### 9.1 Admin agent (containers, 2026-11-26)
+
+- `admin-agent` em `<LAN_IP>:8093` (LAN only) e `docker-socket-proxy` na rede
+  interna `admin-internal`, sem porta publicada.
+- Aba **Admin** no Homepage (some no modo remoto/Tailscale), com login
+  dedicado em `<HOME>/.config/admin-agent/password` (600) e CORS
+  restrito às origens da LAN.
+- Lista os containers do projeto `media` com estado, health, uptime, imagem e
+  portas; ações `start`, `stop` e `restart` com confirmação. Serviços críticos
+  exigem digitar o nome.
+- Protegidos: `admin-agent`, `docker-socket-proxy` e `autoheal`.
+- Não lê `docker-compose.yml`, `.env` nem arquivos de configuração; o socket
+  do Docker fica somente no proxy.
+- Auditoria em `<CONFIG_ROOT>/admin-agent/state/admin-audit.jsonl`; 5 falhas
+  de senha por minuto bloqueiam o IP por 1 minuto.
+- Código e instruções: `deploy/raspberry/admin-agent/`.
+
 ## 10. Gaming agent (PC da casa)
 
 - Container `gaming-agent` (host network), só WOL/status: `8100` privado
@@ -761,8 +781,11 @@ Bazarr em `http://<LAN_IP>:6767`, config
   Homepage 3000, Stremio 11470/12470 e gaming 8098** (status/WOL com senha).
 - LAN-only (bind em `<LAN_IP>`): Radarr 7878, Sonarr 8989, Prowlarr 9696,
   Bazarr 6767, qBittorrent WebUI 8082, métricas 8081, gaming-agent **8100
-  privado** e `media-gateway` (este nem publica porta). O peer do qBittorrent
-  (6881) fica aberto para torrents.
+  privado**, `media-gateway` (este nem publica porta) e `admin-agent` **8093**.
+  O peer do qBittorrent (6881) fica aberto para torrents.
+- O `admin-agent` (8093) exige senha dedicada e allowlist da LAN; o
+  `docker-socket-proxy` fica em rede interna, sem porta publicada. O agente
+  não lê compose, `.env` nem configs, e a aba Admin some no modo remoto.
 - O Homepage detecta o host: acesso por `<LAN_IP>` mostra tudo; acesso pelo
   IP do Tailscale esconde os cards de gestão, mas mantém Jellyfin, Seerr,
   Stremio, **PC Casa** (WOL com senha) e as abas **Pedidos/Legendas** via

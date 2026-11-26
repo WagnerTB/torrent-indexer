@@ -353,7 +353,8 @@ com `&` e `%20`.
   **media-agent 8097** (Pedidos/Legendas). Radarr/Sonarr/Prowlarr/Bazarr/
   qBittorrent/métricas e o **8100 privado** do gaming-agent ficam presos ao IP
   `<LAN_IP>` (LAN). O Homepage detecta o host: no modo remoto esconde os
-  cards de gestão, mas mantém PC Casa e as abas Pedidos/Legendas.
+  cards de gestão, mas mantém PC Casa e as abas Pedidos/Legendas. A aba
+  **Admin** e o `admin-agent` (**8093**) ficam só na LAN.
 - O WOL fica no card **PC Casa**: no modo local usa o 8100 sem senha; no modo
   remoto usa o 8098 e pede a senha definida em `GAMING_PASSWORD` no `.env`
   (`.gaming_password` é fallback legado).
@@ -362,7 +363,8 @@ com `&` e `%20`.
   na hora após import/upgrade/rename.
 - Perfis dublados (Dublado/Anime-Dublado)
   exigem PT-BR desde 2026-10-26 (mínimo 100) e rejeitam `Latino/Espanhol`.
-  O Homepage tem abas no topo **Início**, **Pedidos** e **Legendas**; a aba
+  O Homepage tem abas no topo **Início**, **Pedidos**, **Legendas** e **Admin**
+  (Admin só na LAN); a aba
   Pedidos cruza todos os perfis do Radarr/Sonarr com os pedidos do Seerr
   (pendente, aprovado, recusado ou falhou), tem filtros por tipo/perfil/status
   em Ativos e Histórico, paginação de 10 itens em Ativos, verifica releases
@@ -370,6 +372,11 @@ com `&` e `%20`.
   Sonarr, adiciona com o perfil escolhido sem monitorar tudo e permite marcar e
   buscar episódios específicos. O `custom.js` é buildado a partir de
   `deploy/homepage/src` (ver [deploy/homepage/README.md](deploy/homepage/README.md)).
+- **Admin (2026-11-26)**: `admin-agent` em `<LAN_IP>:8093` com login dedicado,
+  allowlist da LAN e auditoria; lista/start/stop/restart dos containers do
+  projeto `media` via `docker-socket-proxy` interno. Serviços protegidos:
+  `admin-agent`, `docker-socket-proxy` e `autoheal`. Não lê compose, `.env`
+  nem arquivos de configuração. Código em `deploy/raspberry/admin-agent/`.
 
 ## 14. Alterações recentes no working tree
 
@@ -410,6 +417,8 @@ No Pi, também foram atualizados: `gaming-agent/agent.py` (fora do Git; só
 WOL/status, 8100 privada/8098 pública), `media-agent/media_agent.py` (versionado
 em `deploy/raspberry/media-agent/`; Pedidos e Legendas: `/arr/*`, `/sonarr/*`,
 `/bazarr`, quota, porta 8097), `media-gateway/gateway.py` (proxy Torznab),
+`admin-agent/admin_agent.py` (versionado em `deploy/raspberry/admin-agent/`;
+lista/start/stop/restart dos containers, porta 8093 LAN-only),
 `.bazarr_key`, `GAMING_PASSWORD` no `.env` e o `custom.js` do Homepage (modo
 local/remoto, sem segredos). O fonte do `custom.js` está em
 `deploy/homepage/src` e o artefato é gerado com esbuild.

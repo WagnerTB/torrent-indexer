@@ -1,8 +1,9 @@
-﻿import { h, registerTabCount } from './shared.js';
+﻿import { h, registerTabCount, REMOTE } from './shared.js';
 import { injectStyles } from './styles.js';
 import { initOrders } from './orders/index.js';
 import { initSubs } from './subs.js';
 import { initStatus } from './status.js';
+import { initAdmin } from './admin.js';
 
 export function initNav() {
   injectStyles();
@@ -13,6 +14,9 @@ export function initNav() {
     { name: 'pedidos', label: 'Pedidos', href: '?tab=pedidos' },
     { name: 'legendas', label: 'Legendas', href: '?tab=legendas' },
   ];
+  if (!REMOTE) {
+    tabs.push({ name: 'admin', label: 'Admin', href: '?tab=admin' });
+  }
 
   const nav = h('nav', '', '');
   nav.id = 'hx-nav';
@@ -33,7 +37,7 @@ export function initNav() {
     a.setAttribute('aria-selected', 'false');
     if (def.name !== 'home') a.setAttribute('aria-controls', 'hx-pane-' + def.name);
     a.appendChild(h('span', '', def.label));
-    if (def.name !== 'home') {
+    if (def.name !== 'home' && def.name !== 'admin') {
       const count = h('span', 'hx-nav-count', '');
       count.hidden = true;
       a.appendChild(count);
@@ -47,7 +51,7 @@ export function initNav() {
   view.id = 'hx-view';
   view.hidden = true;
   const panes = {};
-  for (const name of ['pedidos', 'legendas']) {
+  for (const name of ['pedidos', 'legendas', 'admin']) {
     const pane = h('section', 'hx-pane', '');
     pane.id = 'hx-pane-' + name;
     pane.setAttribute('role', 'tabpanel');
@@ -67,8 +71,9 @@ export function initNav() {
 
   const orders = initOrders(panes.pedidos);
   const legendas = initSubs(panes.legendas);
+  const admin = initAdmin(panes.admin);
   const status = initStatus();
-  const instances = { pedidos: orders, legendas };
+  const instances = { pedidos: orders, legendas, admin };
 
   let active = 'home';
   let mounted = false;
@@ -76,7 +81,8 @@ export function initNav() {
   function readTab() {
     try {
       const value = new URLSearchParams(location.search).get('tab');
-      return value === 'pedidos' || value === 'legendas' ? value : 'home';
+      const allowed = tabs.map((tab) => tab.name);
+      return allowed.includes(value) ? value : 'home';
     } catch (e) {
       return 'home';
     }
@@ -98,6 +104,7 @@ export function initNav() {
     view.hidden = isHome;
     panes.pedidos.hidden = active !== 'pedidos';
     panes.legendas.hidden = active !== 'legendas';
+    panes.admin.hidden = active !== 'admin';
     document.body.classList.toggle('hx-tab-active', !isHome);
     for (const def of tabs) {
       const selected = def.name === active;

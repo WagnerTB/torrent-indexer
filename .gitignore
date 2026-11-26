@@ -5,6 +5,7 @@
 .env.*
 !.env.example
 .gaming_password
+.admin_password
 .bazarr_key
 *.pem
 *.key

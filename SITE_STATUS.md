@@ -240,11 +240,15 @@ Teste realizado com `FLARESOLVERR_ADDRESS=http://<LAN_IP>.1:8191`
   Stremio 11470/12470, gaming 8098 (status/WOL com senha) e media-agent 8097
   (Pedidos/Legendas).
 - LAN-only (`<LAN_IP>`): Radarr 7878, Sonarr 8989, Prowlarr 9696, Bazarr
-  6767, qBittorrent WebUI 8082, métricas 8081, gaming-agent 8100 (só WOL) e
-  `media-gateway` (sem porta).
+  6767, qBittorrent WebUI 8082, métricas 8081, gaming-agent 8100 (só WOL),
+  `media-gateway` (sem porta) e `admin-agent` 8093.
 - Homepage adaptativo: `<LAN_IP>:3000` mostra tudo; `<TAILSCALE_IP>:3000`
   esconde os cards de gestão e mantém Jellyfin/Seerr/Stremio + PC Casa e as
-  abas Pedidos/Legendas via media-agent.
+  abas Pedidos/Legendas via media-agent. A aba **Admin** só aparece na LAN.
+- Aba Admin (LAN): login dedicado, lista os containers do projeto `media` e
+  permite start/stop/restart com confirmação; protegidos: `admin-agent`,
+  `docker-socket-proxy` e `autoheal`. Auditoria em
+  `<CONFIG_ROOT>/admin-agent/state`; não lê compose, `.env` nem configs.
 - Aba Pedidos: além do status dos perfis dublados no Radarr/Sonarr, mostra
   pedidos do Seerr pendentes/aprovados que ainda não chegaram aos *arr e
   recusados/falhos. Também busca séries/animes no Sonarr, adiciona com o perfil

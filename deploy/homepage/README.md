@@ -16,9 +16,26 @@ Raspberry Pi é um **artefato de build**; não edite o `custom.js` do Pi à mão
 - `src/orders/episodes.js` — modal de episódios.
 - `src/orders/add-series.js` — busca e inclusão de séries.
 - `src/status.js` — card “Status Raspberry” (CPU, RAM, temperatura, voltagem, uptime e armazenamento).
+- `src/admin.js` — aba Admin (login dedicado, containers Docker e auditoria).
 - `src/nav.js` — navegação por abas.
 - `src/wake.js` — Wake-on-LAN.
 - `src/main.js` — entrada e `init()`.
+
+## Aba Admin
+
+A aba **Admin** só aparece no modo local (LAN). Ela fala com o `admin-agent`
+em `http://<LAN_IP>:8093` usando a senha dedicada guardada em
+`$HOME/.config/admin-agent/password` no Pi.
+
+- Lista os containers do projeto Compose `media` com estado, health, uptime,
+  imagem e portas.
+- Permite **Iniciar**, **Parar** e **Reiniciar**, com confirmação; serviços
+  críticos exigem digitar o nome.
+- Mostra as últimas ações e falhas de autenticação.
+- **Não** lê `docker-compose.yml`, `.env` nem arquivos de configuração.
+
+O agente e o proxy restrito do Docker estão em
+`deploy/raspberry/admin-agent/README.md` e no compose do Pi.
 
 ## Build
 
@@ -27,6 +44,13 @@ Requer Node.js 20+ e npm. Na primeira vez:
 ```sh
 npm ci
 npm run build
+```
+
+Se a Pi não tiver Node, use o container oficial:
+
+```sh
+docker run --rm -v "$PWD":/app -w /app node:20-alpine \
+  sh -c "npm ci && npm run build && npm run check"
 ```
 
 O build gera `dist/custom.js` como um único IIFE clássico (o Homepage não
@@ -72,6 +96,6 @@ e use **Limpar aviso**; se ocorrer de novo, o aviso volta.
 
 - `npm run build && npm run check`
 - Testar desktop (1400×2200) e mobile (390×844): Início, Pedidos (Ativos,
-  Histórico), Legendas, modal de episódios, add-series e card Status Raspberry
-  (recolhido e aberto).
+  Histórico), Legendas, modal de episódios, add-series, card Status Raspberry
+  (recolhido e aberto) e aba Admin (login, lista, modais e ações).
 - Conferir console sem erros e comparar textos/estado com a versão anterior.
