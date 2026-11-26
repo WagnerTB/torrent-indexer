@@ -297,7 +297,9 @@ class JellyfinClient:
 
     def me(self, token: str):
         status, _, text, data = self.http.json(
-            "GET", "/Users/Me", headers={"X-Emby-Token": token, "Authorization": JELLYFIN_HEADER}
+            "GET",
+            "/Users/Me",
+            headers={"Authorization": JELLYFIN_HEADER + f', Token="{token}"'},
         )
         if status in (401, 403):
             raise ApiError(401, "invalid_token", "token do Jellyfin inválido")

@@ -739,6 +739,13 @@ Bazarr em `http://<LAN_IP>:6767`, config
   Jellyfin; não documentar o valor.
 - Backups do `options.xml` da biblioteca em
   `root/default/Séries/options.xml.bak.*`.
+- Atualizado para **12.4.0** em 2026-11-26 (imagem
+  `jellyfin/jellyfin:12.4`). Backup completo em
+  `<BACKUP_ROOT>/jellyfin-10.11.11-20261126-200235`; o plugin File
+  Transformation foi removido antes da migração (não estava em uso) e o scan
+  completo foi executado.
+- No Jellyfin 12, `X-Emby-Token` é legado/desativado; usar
+  `Authorization: MediaBrowser Token="..."`. O `media-bff` foi ajustado.
 
 ## 12. Fluxo de um pedido
 
@@ -892,8 +899,8 @@ curl -s -X POST -H "X-Api-Key: <PROWLARR_API_KEY>" \
   -d '{"name":"ApplicationIndexerSync"}' \
   http://<LAN_IP>:9696/api/v1/command
 
-# Jellyfin: forçar scan (token em <CONFIG_ROOT>/jellyfin/data/jellyfin.db)
-curl -s -X POST -H "X-Emby-Token: <JELLYFIN_TOKEN>" \
+# Jellyfin 12+: forçar scan (token em <CONFIG_ROOT>/jellyfin/data/jellyfin.db)
+curl -s -X POST -H 'Authorization: MediaBrowser Token="<JELLYFIN_TOKEN>"' \
   http://<LAN_IP>:8096/Library/Refresh
 
 # Bazarr: status
@@ -935,6 +942,16 @@ docker logs --tail 30 media-media-bff-1
 - Rollback: `git show <commit>:deploy/raspberry/media-agent/api_v1.py > <CONFIG_ROOT>/media-agent/api_v1.py` e `docker compose restart media-bff`.
 
 ## 17. Histórico das implementações
+
+### 2026-11-26
+
+- Aba **Admin** LAN-only no Homepage com `admin-agent` e
+  `docker-socket-proxy`; login dedicado, start/stop/restart e auditoria.
+- Jellyfin atualizado de 10.11.11 para **12.4.0**; imagem fixada em
+  `jellyfin/jellyfin:12.4`; backup completo e scan completo executados.
+- Plugin File Transformation removido antes da migração (não estava em uso).
+- `media-bff` ajustado para `Authorization: MediaBrowser Token="..."`;
+  `test_api_v1.py` atualizado (67 testes).
 
 ### 2026-11-25
 

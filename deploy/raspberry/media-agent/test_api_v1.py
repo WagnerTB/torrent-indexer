@@ -72,7 +72,13 @@ class FakeJellyfin(_Base):
         if self.path != "/Users/Me":
             return self._send(404, {"message": "not found"})
         FakeJellyfin.me_calls += 1
-        user = TOKENS.get(self.headers.get("X-Emby-Token"))
+        auth = self.headers.get("Authorization") or ""
+        token = None
+        if 'Token="' in auth:
+            token = auth.split('Token="', 1)[1].split('"', 1)[0]
+        else:
+            token = self.headers.get("X-Emby-Token")
+        user = TOKENS.get(token)
         if user is None:
             return self._send(401, {"message": "token inválido"})
         return self._send(200, user)

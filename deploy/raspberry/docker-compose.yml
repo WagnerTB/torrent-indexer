@@ -212,7 +212,7 @@ services:
     networks: [media]
 
   jellyfin:
-    image: jellyfin/jellyfin:latest
+    image: jellyfin/jellyfin:12.4
     restart: unless-stopped
     environment:
       TZ: ${TZ}
