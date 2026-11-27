@@ -50,6 +50,10 @@ Rotas públicas:
     POST /api/v1/pc/wake
     GET  /api/v1/subs/quota
     GET  /api/v1/subs/queue
+    POST /api/v1/subs/sync       {item_id, media_source_id, subtitle_index}
+    GET  /api/v1/subs/sync/{id}  status da sincronização automática
+    GET  /api/v1/vps             estado do Jellyfin/VPS (nunca inicia)
+    POST /api/v1/vps/wake        inicialização explícita do usuário
 
 Rotas de admin (só no listener --admin):
     GET  /api/v1/admin/ping
@@ -70,8 +74,13 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
+import shutil
+import signal
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -81,6 +90,13 @@ from http.client import HTTPConnection, HTTPSConnection
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
+
+from vps_controller import (
+    VpsController,
+    VpsControllerConfig,
+    VpsControllerError,
+    unavailable_payload,
+)
 
 VERSION = "0.1.0"
 # Keyword TMDB usada pelo Seerr para marcar anime (ver PLANO_PACKS_TEMPORADA.md).
@@ -306,6 +322,16 @@ class JellyfinClient:
         if status != 200 or not isinstance(data, dict):
             raise ApiError(502, "jellyfin_unavailable", f"Jellyfin respondeu {status}")
         return data
+
+    def api(self, method: str, path: str, api_key: str, body=None, timeout=None):
+        """Chamada server-side usando uma API key (nunca exposta ao app)."""
+        return self.http.json(
+            method,
+            path,
+            body=body,
+            headers={"Authorization": JELLYFIN_HEADER + f', Token="{api_key}"'},
+            timeout=timeout,
+        )
 
 
 class AuthCache:
@@ -623,7 +649,7 @@ class TokenSigner:
         sig = b64url(hmac.new(self.key, body.encode(), hashlib.sha256).digest())
         return f"{body}.{sig}", payload["exp"]
 
-    def verify(self, token: str):
+    def verify(self, token: str, max_expired: float = 0):
         try:
             body, sig = token.rsplit(".", 1)
         except ValueError:
@@ -635,7 +661,10 @@ class TokenSigner:
             payload = json.loads(unb64url(body))
         except (ValueError, json.JSONDecodeError):
             raise ApiError(401, "invalid_session", "payload inválido") from None
-        if int(payload.get("exp", 0)) <= time.time():
+        # `max_expired` só é usado pelas rotas de VPS: o app precisa consultar e
+        # acordar o servidor mesmo quando o Jellyfin (IdP) está desligado e o
+        # token do BFF já venceu. A assinatura continua sendo validada.
+        if int(payload.get("exp", 0)) <= time.time() - max(0, max_expired):
             raise ApiError(401, "session_expired", "sessão expirada")
         return payload
 
@@ -663,6 +692,15 @@ class Config:
     qbittorrent_url: str = "http://127.0.0.1:8082"
     rate_limit_session: int = 20
     rate_limit_default: int = 240
+    vps_token_grace: int = 30 * 86400
+    vps_controller: VpsControllerConfig | None = None
+    jellyfin_api_key: str = ""
+    jellyfin_api_key_file: str = "/seerr/settings.json"
+    subs_sync_enabled: bool = True
+    subs_sync_timeout: float = 900.0
+    subs_sync_max_offset: int = 300
+    subs_sync_max_jobs: int = 2
+    subs_sync_allowed_roots: tuple = ("/media",)
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -691,6 +729,22 @@ class Config:
             qbittorrent_url=os.getenv("QBITTORRENT_URL", "http://127.0.0.1:8082"),
             rate_limit_session=int(os.getenv("V1_RATE_SESSION", "20")),
             rate_limit_default=int(os.getenv("V1_RATE_DEFAULT", "240")),
+            vps_token_grace=int(os.getenv("V1_VPS_TOKEN_GRACE", str(30 * 86400))),
+            vps_controller=VpsControllerConfig.from_env(),
+            jellyfin_api_key=os.getenv("JELLYFIN_API_KEY", "").strip(),
+            jellyfin_api_key_file=os.getenv(
+                "JELLYFIN_API_KEY_FILE", "/seerr/settings.json"
+            ).strip(),
+            subs_sync_enabled=os.getenv("SUBS_SYNC_ENABLED", "1").strip().lower()
+            not in ("0", "false", "no", "off"),
+            subs_sync_timeout=float(os.getenv("SUBS_SYNC_TIMEOUT", "900")),
+            subs_sync_max_offset=int(os.getenv("SUBS_SYNC_MAX_OFFSET", "300")),
+            subs_sync_max_jobs=int(os.getenv("SUBS_SYNC_MAX_JOBS", "2")),
+            subs_sync_allowed_roots=tuple(
+                item.strip()
+                for item in os.getenv("SUBS_SYNC_ROOTS", "/media").split(",")
+                if item.strip()
+            ),
         )
 
 
@@ -713,6 +767,649 @@ class Services:
         self.signer = TokenSigner(
             load_or_create_key(os.path.join(cfg.state_dir, "v1.token.key")),
             cfg.token_ttl,
+        )
+        self.vps = VpsController(cfg.vps_controller) if cfg.vps_controller else None
+        self.subtitle_sync = SubtitleSyncService(cfg, self.jellyfin)
+
+
+# --------------------------------------------------------------------------
+# Sincronização automática de legendas (ffsubsync)
+# --------------------------------------------------------------------------
+
+class SyncFailure(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def load_jellyfin_api_key(cfg: Config) -> str:
+    """Lê a API key do Jellyfin (env ou config do Jellyseerr, já montada no BFF)."""
+    if cfg.jellyfin_api_key:
+        return cfg.jellyfin_api_key
+    try:
+        with open(cfg.jellyfin_api_key_file, encoding="utf-8") as handle:
+            settings = json.load(handle)
+    except Exception:
+        raise SyncFailure(
+            "jellyfin_key_missing",
+            "A chave do Jellyfin não está configurada no servidor.",
+        ) from None
+    key = str(((settings.get("jellyfin") or {}).get("apiKey") or "")).strip()
+    if not key:
+        raise SyncFailure(
+            "jellyfin_key_missing",
+            "A chave do Jellyfin não está configurada no servidor.",
+        )
+    return key
+
+
+def _sync_headers(api_key: str) -> dict:
+    return {"Authorization": JELLYFIN_HEADER + f', Token="{api_key}"'}
+
+
+def _safe_media_path(path: str, roots) -> str:
+    if not path:
+        raise SyncFailure("media_not_found", "Arquivo de mídia não encontrado.")
+    real = os.path.realpath(path)
+    for root in roots or ("/media",):
+        root_real = os.path.realpath(root)
+        try:
+            if os.path.commonpath([real, root_real]) == root_real:
+                break
+        except ValueError:
+            continue
+    else:
+        raise SyncFailure("media_not_found", "Arquivo fora da pasta de mídia.")
+    if not os.path.isfile(real):
+        raise SyncFailure("media_not_found", "Arquivo de mídia não encontrado.")
+    return real
+
+
+@dataclass
+class SyncTarget:
+    video: str
+    subtitle: str | None
+    embedded_index: int | None
+    language: str | None
+    label: str | None
+    extension: str
+
+
+_IMAGE_SUBTITLE_CODECS = {
+    "pgs", "pgssub", "hdmv_pgs_subtitle", "dvdsub", "vobsub",
+    "dvb_subtitle", "xsub", "dvbsub",
+}
+_TEXT_SUBTITLE_CODECS = {
+    "subrip", "srt", "ass", "ssa", "webvtt", "vtt", "mov_text", "text",
+    "ttml", "sami", "microdvd", "mpl2", "realtext", "subviewer",
+    "subviewer1", "vplayer",
+}
+_SYNC_EXTERNAL_EXTENSIONS = {".srt", ".ass", ".ssa"}
+_LANGUAGE_RE = re.compile(r"^[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?$")
+
+
+def _safe_language(value) -> str:
+    language = str(value or "").strip().replace("_", "-")
+    return language if _LANGUAGE_RE.match(language) else "und"
+
+
+def _sidecar_path(video: str, language) -> str:
+    base, _ = os.path.splitext(video)
+    return f"{base}.{_safe_language(language)}.srt"
+
+
+def resolve_sync_targets(
+    client: JellyfinClient,
+    api_key: str,
+    item_id: str,
+    media_source_id: str | None,
+    subtitle_index: int,
+    roots,
+) -> SyncTarget:
+    """Localiza o vídeo e a legenda (externa ou embutida) no Jellyfin."""
+    query = (
+        "/Items?Ids=" + quote(item_id, safe="")
+        + "&Fields=Path,MediaSources,MediaStreams&Limit=1"
+    )
+    status, _, _, data = client.api("GET", query, api_key)
+    if status != 200 or not isinstance(data, dict):
+        raise SyncFailure(
+            "jellyfin_unavailable",
+            "Não foi possível consultar o item no Jellyfin.",
+        )
+    items = data.get("Items") or []
+    if not items:
+        raise SyncFailure("item_not_found", "Item não encontrado no Jellyfin.")
+    item = items[0] if isinstance(items[0], dict) else {}
+    sources = [s for s in (item.get("MediaSources") or []) if isinstance(s, dict)]
+    source = None
+    if media_source_id:
+        source = next(
+            (s for s in sources if str(s.get("Id") or "") == media_source_id),
+            None,
+        )
+    if source is None:
+        source = sources[0] if sources else None
+    if not source:
+        raise SyncFailure("media_not_found", "Fonte de vídeo indisponível.")
+
+    video = _safe_media_path(str(source.get("Path") or ""), roots)
+    streams = [s for s in (source.get("MediaStreams") or []) if isinstance(s, dict)]
+    stream = next(
+        (
+            s for s in streams
+            if s.get("Type") == "Subtitle" and to_int(s.get("Index")) == subtitle_index
+        ),
+        None,
+    )
+    if stream is None:
+        raise SyncFailure("subtitle_not_found", "Faixa de legenda não encontrada.")
+
+    language = stream.get("Language")
+    label = stream.get("DisplayTitle")
+    if bool(stream.get("IsExternal")) and stream.get("Path"):
+        subtitle = _safe_media_path(str(stream.get("Path") or ""), roots)
+        extension = os.path.splitext(subtitle)[1].lower()
+        if extension not in _SYNC_EXTERNAL_EXTENSIONS:
+            raise SyncFailure(
+                "subtitle_format",
+                "A sincronização automática aceita legendas .srt, .ass ou .ssa.",
+            )
+        return SyncTarget(video, subtitle, None, language, label, extension)
+
+    # Legenda embutida: precisa ser texto (imagem não dá para converter em SRT).
+    codec = str(stream.get("Codec") or "").strip().lower()
+    if codec in _IMAGE_SUBTITLE_CODECS:
+        raise SyncFailure(
+            "subtitle_image",
+            "Esta legenda é uma imagem (PGS/DVD). Use o ajuste manual.",
+        )
+    if codec and codec not in _TEXT_SUBTITLE_CODECS:
+        raise SyncFailure(
+            "subtitle_format",
+            "Esta faixa embutida não é uma legenda de texto compatível.",
+        )
+    embedded_index = to_int(stream.get("Index"))
+    if embedded_index is None:
+        raise SyncFailure("subtitle_not_found", "Faixa de legenda inválida.")
+    return SyncTarget(video, None, embedded_index, language, label, ".srt")
+
+
+def extract_embedded_subtitle(video_path: str, stream_index: int, output_path: str) -> None:
+    """Extrai uma faixa de legenda embutida do MKV para SRT via ffmpeg."""
+    cmd = [
+        "ffmpeg", "-y", "-v", "error",
+        "-i", video_path,
+        "-map", f"0:{stream_index}",
+        "-c:s", "srt",
+        output_path,
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except FileNotFoundError:
+        raise SyncFailure(
+            "sync_unavailable",
+            "O ffmpeg não está instalado no servidor.",
+        ) from None
+    except subprocess.TimeoutExpired:
+        raise SyncFailure(
+            "subtitle_extract_failed",
+            "A extração da legenda demorou demais.",
+        ) from None
+    if result.returncode != 0:
+        tail = (result.stderr or "").strip().splitlines()[-2:]
+        log.warning("ffmpeg extração rc=%s: %s", result.returncode, " | ".join(tail)[:400])
+        raise SyncFailure(
+            "subtitle_extract_failed",
+            "Não foi possível extrair esta legenda embutida.",
+        )
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+        raise SyncFailure(
+            "subtitle_extract_failed",
+            "A legenda embutida saiu vazia.",
+        )
+
+
+_TIMESTAMP_RE = re.compile(r"(\d{1,3}):(\d{2}):(\d{2})[,.](\d{1,3})")
+
+
+def _first_cue_start_ms(path: str) -> int | None:
+    try:
+        with open(path, encoding="utf-8-sig", errors="replace") as handle:
+            for line in handle:
+                if "-->" not in line:
+                    continue
+                match = _TIMESTAMP_RE.search(line)
+                if not match:
+                    continue
+                hours, minutes, seconds, millis = match.groups()
+                return (
+                    (int(hours) * 3600 + int(minutes) * 60 + int(seconds)) * 1000
+                    + int(millis.ljust(3, "0")[:3])
+                )
+    except OSError:
+        return None
+    return None
+
+
+def _format_offset(offset_ms: int) -> str:
+    return f"{offset_ms / 1000.0:+.1f} s".replace(".", ",")
+
+
+_OFFSET_RE = re.compile(r"offset seconds:\s*(-?\d+(?:\.\d+)?)")
+
+
+def _offset_from_log(text: str) -> int | None:
+    match = _OFFSET_RE.search(text or "")
+    if not match:
+        return None
+    return int(round(float(match.group(1)) * 1000))
+
+
+def run_ffsubsync(
+    video_path: str,
+    subtitle_path: str,
+    output_path: str,
+    timeout: float,
+    max_offset: int,
+) -> tuple[float, str]:
+    """Roda o ffsubsync com timeout e mata o ffmpeg filho se necessário."""
+    cmd = [
+        "ffsubsync",
+        video_path,
+        "-i",
+        subtitle_path,
+        "-o",
+        output_path,
+        "--max-offset-seconds",
+        str(max_offset),
+        "--skip-sync-on-low-quality",
+        "--quality-max-offset-seconds",
+        str(max_offset),
+    ]
+    env = dict(os.environ)
+    env.update({"NO_COLOR": "1", "TERM": "dumb", "PYTHONUNBUFFERED": "1"})
+    started = time.time()
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+            start_new_session=True,
+        )
+    except FileNotFoundError:
+        raise SyncFailure(
+            "sync_unavailable",
+            "O ffsubsync não está instalado no servidor.",
+        ) from None
+
+    try:
+        saida, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            proc.kill()
+        proc.communicate()
+        raise SyncFailure(
+            "sync_timeout",
+            "A sincronização demorou demais e foi cancelada.",
+        ) from None
+
+    if proc.returncode != 0:
+        tail = " | ".join((saida or "").strip().splitlines()[-2:])
+        log.warning("ffsubsync rc=%s: %s", proc.returncode, tail[:400])
+        raise SyncFailure(
+            "sync_failed",
+            "Não foi possível sincronizar esta legenda.",
+        )
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+        raise SyncFailure(
+            "sync_low_confidence",
+            "O alinhamento não foi confiável; a legenda não foi alterada.",
+        )
+    return round(time.time() - started, 1), (saida or "")
+
+
+def refresh_jellyfin_item(
+    client: JellyfinClient,
+    api_key: str,
+    item_id: str,
+    video_path: str,
+) -> bool:
+    """Avisa o Jellyfin que o arquivo mudou (melhor esforço)."""
+    headers = _sync_headers(api_key)
+    ok = False
+    try:
+        status, _, _ = client.http.request(
+            "POST",
+            "/Library/Media/Updated",
+            body={"Updates": [{"Path": video_path, "UpdateType": "Modified"}]},
+            headers=headers,
+            timeout=15,
+        )
+        ok = status in (200, 204)
+    except Exception as exc:  # noqa: BLE001 - refresh nunca derruba o sync
+        log.warning("jellyfin media updated falhou: %s", exc)
+    try:
+        item_path = quote(item_id, safe="")
+        status, _, _ = client.http.request(
+            "POST",
+            f"/Items/{item_path}/Refresh?MetadataRefreshMode=ValidationOnly"
+            "&ImageRefreshMode=None",
+            headers=headers,
+            timeout=15,
+        )
+        ok = ok or status in (200, 204)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("jellyfin refresh do item falhou: %s", exc)
+    return ok
+
+
+class SubtitleSyncService:
+    """Fila simples em memória (o BFF é ThreadingHTTPServer, um processo só).
+
+    Um worker por vez para não sobrecarregar o Pi; o app acompanha por polling.
+    """
+
+    JOB_TTL = 3600.0
+
+    def __init__(self, cfg: Config, jellyfin: JellyfinClient):
+        self.cfg = cfg
+        self.jellyfin = jellyfin
+        self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
+        self._jobs: dict[str, dict] = {}
+        self._pending: list[str] = []
+        self._thread: threading.Thread | None = None
+
+    # ---- API interna -----------------------------------------------------
+
+    def _start_worker(self) -> None:
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                return
+            self._thread = threading.Thread(
+                target=self._loop,
+                name="subtitle-sync",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def _prune(self) -> None:
+        now = time.time()
+        for job_id, job in list(self._jobs.items()):
+            finished = job.get("finished_at")
+            if finished and now - finished > self.JOB_TTL:
+                self._jobs.pop(job_id, None)
+
+    def _update(self, job: dict, **fields) -> None:
+        with self._lock:
+            job.update(fields)
+
+    def submit(
+        self,
+        owner: str,
+        item_id: str,
+        media_source_id: str | None,
+        subtitle_index: int,
+    ) -> dict:
+        if not self.cfg.subs_sync_enabled:
+            raise ApiError(
+                503,
+                "sync_disabled",
+                "A sincronização automática está desativada.",
+            )
+        with self._lock:
+            self._prune()
+            for job in self._jobs.values():
+                if (
+                    job["status"] in ("queued", "running")
+                    and job["item_id"] == item_id
+                    and job.get("media_source_id") == media_source_id
+                    and job["subtitle_index"] == subtitle_index
+                ):
+                    if job.get("owner") == owner:
+                        return dict(job)
+                    raise ApiError(
+                        429,
+                        "sync_busy",
+                        "Já existe uma sincronização em andamento para esta legenda.",
+                    )
+            ativos = sum(
+                1 for job in self._jobs.values()
+                if job["status"] in ("queued", "running")
+            )
+            if ativos >= max(1, self.cfg.subs_sync_max_jobs):
+                raise ApiError(
+                    429,
+                    "sync_busy",
+                    "Já existe uma sincronização em andamento. "
+                    "Tente de novo em alguns minutos.",
+                )
+            job = {
+                "id": secrets.token_hex(8),
+                "owner": owner,
+                "item_id": item_id,
+                "media_source_id": media_source_id,
+                "subtitle_index": subtitle_index,
+                "status": "queued",
+                "message": "Na fila…",
+                "code": None,
+                "offset_ms": None,
+                "created_at": time.time(),
+                "started_at": None,
+                "finished_at": None,
+            }
+            self._jobs[job["id"]] = job
+            self._pending.append(job["id"])
+            self._cond.notify()
+        self._start_worker()
+        return dict(job)
+
+    def get(self, job_id: str, owner: str) -> dict | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.get("owner") != owner:
+                return None
+            return dict(job)
+
+    def public(self, job: dict) -> dict:
+        started = job.get("started_at")
+        finished = job.get("finished_at")
+        elapsed = None
+        if started:
+            elapsed = round((finished or time.time()) - started, 1)
+        return {
+            "job_id": job["id"],
+            "status": job["status"],
+            "message": job.get("message"),
+            "code": job.get("code"),
+            "offset_ms": job.get("offset_ms"),
+            "elapsed_seconds": elapsed,
+            "external_created": bool(job.get("external_created")),
+            "language": job.get("language"),
+        }
+
+    # ---- worker ----------------------------------------------------------
+
+    def _loop(self) -> None:
+        while True:
+            with self._cond:
+                while not self._pending:
+                    self._cond.wait(timeout=60)
+                job_id = self._pending.pop(0)
+                job = self._jobs.get(job_id)
+                if job is None:
+                    continue
+                job["status"] = "running"
+                job["started_at"] = time.time()
+                job["message"] = "Preparando sincronização…"
+
+            try:
+                self._execute(job)
+            except SyncFailure as exc:
+                self._update(
+                    job,
+                    status="error",
+                    code=exc.code,
+                    message=exc.message,
+                    finished_at=time.time(),
+                )
+            except Exception:  # noqa: BLE001 - nunca mata o worker
+                log.exception("falha inesperada no sync de legendas")
+                self._update(
+                    job,
+                    status="error",
+                    code="internal_error",
+                    message="Erro interno ao sincronizar a legenda.",
+                    finished_at=time.time(),
+                )
+
+    def _execute(self, job: dict) -> None:
+        api_key = load_jellyfin_api_key(self.cfg)
+        self._update(job, message="Consultando o Jellyfin…")
+        target = resolve_sync_targets(
+            self.jellyfin,
+            api_key,
+            job["item_id"],
+            job.get("media_source_id"),
+            int(job["subtitle_index"]),
+            self.cfg.subs_sync_allowed_roots,
+        )
+
+        video = target.video
+        extracted = None
+        external_created = False
+        backup = None
+        offset_ms = 0
+        temp_output = None
+
+        if target.embedded_index is not None:
+            self._update(job, message="Extraindo a legenda embutida…")
+            extracted = os.path.join(
+                tempfile.gettempdir(), f"subsync-{job['id']}.srt"
+            )
+            try:
+                extract_embedded_subtitle(video, target.embedded_index, extracted)
+            except Exception:
+                try:
+                    os.remove(extracted)
+                except FileNotFoundError:
+                    pass
+                raise
+            source_subtitle = extracted
+            temp_output = _sidecar_path(video, target.language)
+            if os.path.exists(temp_output):
+                try:
+                    os.remove(extracted)
+                except FileNotFoundError:
+                    pass
+                raise SyncFailure(
+                    "subtitle_exists",
+                    "Já existe uma legenda externa para este idioma. "
+                    "Sincronize essa faixa externa.",
+                )
+            original_start = None
+        else:
+            source_subtitle = target.subtitle
+            original_start = (
+                _first_cue_start_ms(source_subtitle)
+                if target.extension == ".srt"
+                else None
+            )
+            temp_output = (
+                source_subtitle + f".sync-{job['id']}.tmp{target.extension}"
+            )
+
+        self._update(job, message="Analisando o áudio do vídeo…")
+        try:
+            elapsed, log_text = run_ffsubsync(
+                video,
+                source_subtitle,
+                temp_output,
+                self.cfg.subs_sync_timeout,
+                self.cfg.subs_sync_max_offset,
+            )
+            offset_ms = _offset_from_log(log_text)
+            if offset_ms is None:
+                new_start = (
+                    _first_cue_start_ms(temp_output)
+                    if target.extension == ".srt"
+                    else None
+                )
+                if original_start is not None and new_start is not None:
+                    offset_ms = new_start - original_start
+                else:
+                    offset_ms = 0
+
+            if target.embedded_index is not None:
+                external_created = True
+            else:
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                backup = f"{source_subtitle}.bak.sync.{stamp}-{job['id'][:6]}"
+                shutil.copy2(source_subtitle, backup)
+                os.chmod(temp_output, os.stat(source_subtitle).st_mode)
+                os.replace(temp_output, source_subtitle)
+        except Exception:
+            if target.embedded_index is not None:
+                try:
+                    os.remove(temp_output)
+                except FileNotFoundError:
+                    pass
+            raise
+        finally:
+            if extracted:
+                try:
+                    os.remove(extracted)
+                except FileNotFoundError:
+                    pass
+            if target.embedded_index is None:
+                try:
+                    os.remove(temp_output)
+                except FileNotFoundError:
+                    pass
+
+        self._update(job, message="Atualizando o Jellyfin…")
+        refreshed = refresh_jellyfin_item(
+            self.jellyfin, api_key, job["item_id"], video
+        )
+        if abs(offset_ms) < 300:
+            message = "Legenda sincronizada (já estava praticamente alinhada)."
+        else:
+            message = (
+                "Legenda sincronizada (deslocamento de "
+                + _format_offset(offset_ms)
+                + ")."
+            )
+        if external_created:
+            message += (
+                " Nova faixa externa "
+                + _safe_language(target.language).upper()
+                + " criada."
+            )
+        if not refreshed:
+            message += " Se a legenda nova não aparecer, reabra o vídeo."
+        self._update(
+            job,
+            status="done",
+            code="subtitle_synced",
+            message=message,
+            offset_ms=offset_ms,
+            elapsed_seconds=elapsed,
+            backup=backup,
+            external_created=external_created,
+            language=target.language,
+            label=target.label,
+            finished_at=time.time(),
         )
 
 
@@ -809,6 +1506,17 @@ def make_handler(services: Services, public: bool):
 
         def _identity(self):
             return services.signer.verify(self._bearer())
+
+        def _identity_vps(self):
+            """Aceita token vencido dentro da janela de offline (VPS desligada).
+
+            Só as rotas de VPS usam isso: sem o Jellyfin no ar não há como
+            renovar a sessão, mas o aparelho já autorizado ainda pode consultar
+            o estado e pedir a inicialização.
+            """
+            return services.signer.verify(
+                self._bearer(), max_expired=cfg.vps_token_grace
+            )
 
         def _query(self):
             return parse_qs(urlsplit(self.path).query)
@@ -930,6 +1638,14 @@ def make_handler(services: Services, public: bool):
                 return self._subs_quota()
             if path == "/api/v1/subs/queue" and method == "GET":
                 return self._subs_queue()
+            if path == "/api/v1/subs/sync" and method == "POST":
+                return self._subs_sync_start()
+            if path.startswith("/api/v1/subs/sync/") and method == "GET":
+                return self._subs_sync_status(path.rsplit("/", 1)[-1])
+            if path == "/api/v1/vps" and method == "GET":
+                return self._vps_status()
+            if path == "/api/v1/vps/wake" and method == "POST":
+                return self._vps_wake()
             if path == "/api/v1/admin/ping" and method == "GET":
                 return self._admin_ping()
             if path == "/api/v1/admin/downloads" and method == "GET":
@@ -2061,6 +2777,45 @@ def make_handler(services: Services, public: bool):
                 "sent": bool(data.get("ok")),
             })
 
+        def _vps_status(self) -> None:
+            """Consulta o controlador. Nunca chama /wake, mesmo em erro."""
+            self._identity_vps()
+            if services.vps is None:
+                exc = VpsControllerError(
+                    "not_configured",
+                    "Integração com o controlador da VPS não configurada.",
+                    http_status=503,
+                )
+                return self._send(200, unavailable_payload(exc))
+            try:
+                payload = services.vps.status()
+            except VpsControllerError as exc:
+                # 200 com envelope seguro: o app mostra "indisponível" e não
+                # confunde isso com Jellyfin online. Sem segredos no corpo.
+                log.warning("vps status falhou: %s", exc.code)
+                return self._send(200, unavailable_payload(exc))
+            self._send(200, payload)
+
+        def _vps_wake(self) -> None:
+            """Inicialização só por ação explícita e autenticada do app."""
+            self._identity_vps()
+            if services.vps is None:
+                raise ApiError(
+                    503, "vps_controller_not_configured",
+                    "Integração com o controlador da VPS não configurada.",
+                )
+            try:
+                payload = services.vps.wake()
+            except VpsControllerError as exc:
+                log.warning("vps wake falhou: %s", exc.code)
+                raise ApiError(
+                    exc.http_status,
+                    exc.code,
+                    exc.message,
+                    retry_after=exc.retry_after,
+                ) from None
+            self._send(200, payload)
+
         def _subs_quota(self) -> None:
             self._identity()
             data = services.media_agent.get("/subs/quota", timeout=12)
@@ -2125,6 +2880,44 @@ def make_handler(services: Services, public: bool):
                 "movies_total": movies.get("total") or 0,
                 "episodes_total": episodes.get("total") or 0,
             })
+
+        def _subs_sync_start(self) -> None:
+            identity = self._identity()
+            body = self._body()
+            item_id = str(body.get("item_id") or "").strip()
+            if not item_id or len(item_id) > 64:
+                raise ApiError(400, "item_required", "informe item_id")
+            media_source_id = str(body.get("media_source_id") or "").strip() or None
+            subtitle_index = to_int(body.get("subtitle_index"))
+            if subtitle_index is None or subtitle_index < 0:
+                raise ApiError(
+                    400,
+                    "subtitle_index_required",
+                    "informe subtitle_index",
+                )
+            job = services.subtitle_sync.submit(
+                str(identity.get("sub") or ""),
+                item_id,
+                media_source_id,
+                subtitle_index,
+            )
+            self._send(202, {
+                "ok": True,
+                "job_id": job["id"],
+                "status": job["status"],
+                "message": job.get("message"),
+            })
+
+        def _subs_sync_status(self, job_id: str) -> None:
+            identity = self._identity()
+            if not job_id or len(job_id) > 64:
+                raise ApiError(404, "job_not_found", "sincronização não encontrada")
+            job = services.subtitle_sync.get(
+                job_id, str(identity.get("sub") or "")
+            )
+            if job is None:
+                raise ApiError(404, "job_not_found", "sincronização não encontrada")
+            self._send(200, {"ok": True, **services.subtitle_sync.public(job)})
 
         def _require_admin(self):
             if public:

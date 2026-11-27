@@ -15,12 +15,15 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
 
 import api_v1
+import vps_controller
 
 USER = {"Id": "u-user", "Name": "Wagner", "Policy": {"IsAdministrator": False}}
 ADMIN = {"Id": "u-admin", "Name": "admin", "Policy": {"IsAdministrator": True}}
@@ -266,6 +269,78 @@ class FakeGaming(_Base):
         return self._send(404, {"message": "not found"})
 
 
+class FakeVps(_Base):
+    """Controlador Oracle simulado; nunca toca na VPS real."""
+
+    status_code = 200
+    ONLINE_PAYLOAD = {
+        "state": "online",
+        "jellyfin_online": True,
+        "health_checked_at": "2026-11-26T12:00:00Z",
+        "oci_state": "RUNNING",
+        "oci_checked_at": "2026-11-26T11:59:00Z",
+        "oci_error": None,
+        "last_start_at": "2026-11-25T10:00:00Z",
+        "last_start_result": "already_online",
+        "retry_after_seconds": 0,
+        "wake_enabled": True,
+        "poll_after_seconds": 5,
+        "result": "online",
+    }
+    status_payload = dict(ONLINE_PAYLOAD)
+    wake_code = 200
+    START_PAYLOAD = {
+        "state": "starting",
+        "jellyfin_online": False,
+        "health_checked_at": "2026-11-26T12:01:00Z",
+        "oci_state": "STARTING",
+        "oci_checked_at": "2026-11-26T12:01:00Z",
+        "oci_error": None,
+        "last_start_at": "2026-11-26T12:01:00Z",
+        "last_start_result": "start_requested",
+        "retry_after_seconds": 20,
+        "wake_enabled": True,
+        "poll_after_seconds": 5,
+        "result": "start_requested",
+    }
+    wake_payload = dict(START_PAYLOAD)
+    status_calls = 0
+    wake_calls = 0
+    last_status_headers = {}
+    last_wake_headers = {}
+
+    def _auth_ok(self):
+        return (
+            self.headers.get("CF-Access-Client-Id") == "cf-id-teste"
+            and self.headers.get("CF-Access-Client-Secret") == "cf-secret-teste"
+        )
+
+    def do_GET(self):
+        if self.path != "/status":
+            return self._send(404, {"message": "not found"})
+        FakeVps.status_calls += 1
+        FakeVps.last_status_headers = dict(self.headers)
+        if not self._auth_ok():
+            return self._send(403, {"message": "cloudflare access negado"})
+        if self.headers.get("Authorization") != "Bearer read-token-teste":
+            return self._send(403, {"message": "token de leitura inválido"})
+        return self._send(FakeVps.status_code, FakeVps.status_payload)
+
+    def do_POST(self):
+        if self.path != "/wake":
+            return self._send(404, {"message": "not found"})
+        FakeVps.wake_calls += 1
+        FakeVps.last_wake_headers = dict(self.headers)
+        if not self._auth_ok():
+            return self._send(403, {"message": "cloudflare access negado"})
+        if self.headers.get("Authorization") != "Bearer wake-token-teste":
+            return self._send(403, {"message": "token de wake inválido"})
+        headers = ()
+        if FakeVps.wake_code == 429:
+            headers = (("Retry-After", "42"),)
+        return self._send(FakeVps.wake_code, FakeVps.wake_payload, headers)
+
+
 def start(handler_cls):
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
     server.daemon_threads = True
@@ -455,6 +530,7 @@ class BffTest(unittest.TestCase):
         cls.seerr, cls.seerr_url = start(FakeSeerr)
         cls.media, cls.media_url = start(FakeMediaAgent)
         cls.gaming, cls.gaming_url = start(FakeGaming)
+        cls.vps, cls.vps_url = start(FakeVps)
 
         cls.cfg = api_v1.Config(
             jellyfin_url=cls.jellyfin_url,
@@ -469,6 +545,15 @@ class BffTest(unittest.TestCase):
             gaming_url=cls.gaming_url,
             rate_limit_session=1000,
             rate_limit_default=1000,
+            vps_controller=vps_controller.VpsControllerConfig(
+                base_url=cls.vps_url,
+                client_id="cf-id-teste",
+                client_secret="cf-secret-teste",
+                read_token="read-token-teste",
+                wake_token="wake-token-teste",
+                timeout=5,
+                cache_ttl=0,
+            ),
         )
         cls.services = api_v1.Services(cls.cfg)
         cls.public, cls.public_url = api_v1.make_server(cls.services, public=True, port=0)
@@ -485,6 +570,7 @@ class BffTest(unittest.TestCase):
         cls.seerr.shutdown()
         cls.media.shutdown()
         cls.gaming.shutdown()
+        cls.vps.shutdown()
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def setUp(self):
@@ -497,6 +583,17 @@ class BffTest(unittest.TestCase):
         FakeMediaAgent.last = {}
         FakeMediaAgent.owner_pairs = []
         FakeJellyfin.me_calls = 0
+        FakeVps.status_code = 200
+        FakeVps.status_payload = dict(FakeVps.ONLINE_PAYLOAD)
+        FakeVps.wake_code = 200
+        FakeVps.wake_payload = dict(FakeVps.START_PAYLOAD)
+        FakeVps.status_calls = 0
+        FakeVps.wake_calls = 0
+        FakeVps.last_status_headers = {}
+        FakeVps.last_wake_headers = {}
+        if self.services.vps is not None:
+            self.services.vps._cached = None
+            self.services.vps._wake_blocked_until = 0.0
         self.services.auth._cache.clear()
         self.services.store.delete("u-user", "dev-1")
         self.services.store.delete("u-admin", "dev-admin")
@@ -826,6 +923,136 @@ class BffTest(unittest.TestCase):
         status, data = http("GET", f"{self.public_url}/api/v1/pc")
         self.assertEqual(status, 401)
         self.assertEqual(data["code"], "unauthorized")
+
+    # ---- VPS Controller (Oracle) ---------------------------------------
+    #
+    # Nenhum teste toca na VPS real: o controlador é o FakeVps local e
+    # valida os headers/tokens separados de leitura e inicialização.
+
+    def test_vps_status_nao_inicia(self):
+        token, _ = self.login()
+        status, data = http("GET", f"{self.public_url}/api/v1/vps", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["state"], "online")
+        self.assertTrue(data["jellyfin_online"])
+        self.assertTrue(data["controller_online"])
+        self.assertEqual(data["oci_state"], "RUNNING")
+        self.assertEqual(data["poll_after_seconds"], 5)
+        self.assertEqual(FakeVps.status_calls, 1)
+        self.assertEqual(FakeVps.wake_calls, 0, "/status nunca pode chamar /wake")
+        self.assertEqual(
+            FakeVps.last_status_headers.get("Authorization"),
+            "Bearer read-token-teste",
+        )
+
+    def test_vps_status_sem_auth(self):
+        status, data = http("GET", f"{self.public_url}/api/v1/vps")
+        self.assertEqual(status, 401)
+        self.assertEqual(data["code"], "unauthorized")
+        self.assertEqual(FakeVps.status_calls, 0)
+
+    def test_vps_aceita_token_vencido_na_janela_offline(self):
+        # Sem o Jellyfin no ar não há renovação; o aparelho já autorizado ainda
+        # precisa consultar/acordar a VPS. As demais rotas continuam exigindo
+        # token válido.
+        token, _ = self.services.signer.issue(
+            "u-user", "Wagner", "dev-1", False, now=api_v1.time.time() - 7200
+        )
+        status, data = http("GET", f"{self.public_url}/api/v1/vps", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["state"], "online")
+
+        status, data = http("GET", f"{self.public_url}/api/v1/me", token=token)
+        self.assertEqual(status, 401)
+        self.assertEqual(data["code"], "session_expired")
+
+    def test_vps_status_nao_expoe_segredos(self):
+        token, _ = self.login()
+        status, data = http("GET", f"{self.public_url}/api/v1/vps", token=token)
+        self.assertEqual(status, 200, data)
+        corpo = json.dumps(data)
+        for segredo in (
+            "cf-id-teste", "cf-secret-teste", "read-token-teste",
+            "wake-token-teste", "CF-Access", "Authorization",
+        ):
+            self.assertNotIn(segredo, corpo)
+
+    def test_vps_wake_explicito(self):
+        token, _ = self.login()
+        status, data = http("POST", f"{self.public_url}/api/v1/vps/wake", {}, token=token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["result"], "start_requested")
+        self.assertEqual(data["state"], "starting")
+        self.assertEqual(FakeVps.wake_calls, 1)
+        # O wake usa o token dele, não o de leitura.
+        self.assertEqual(
+            FakeVps.last_wake_headers.get("Authorization"),
+            "Bearer wake-token-teste",
+        )
+        self.assertEqual(
+            FakeVps.last_wake_headers.get("CF-Access-Client-Id"),
+            "cf-id-teste",
+        )
+
+    def test_vps_wake_sem_auth(self):
+        status, data = http("POST", f"{self.public_url}/api/v1/vps/wake", {})
+        self.assertEqual(status, 401)
+        self.assertEqual(data["code"], "unauthorized")
+        self.assertEqual(FakeVps.wake_calls, 0)
+
+    def test_vps_status_controlador_fora(self):
+        token, _ = self.login()
+        FakeVps.status_code = 503
+        FakeVps.status_payload = {"code": "oci_unavailable"}
+        status, data = http("GET", f"{self.public_url}/api/v1/vps", token=token)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["state"], "unknown")
+        self.assertFalse(data["jellyfin_online"])
+        self.assertFalse(data["controller_online"])
+        self.assertFalse(data["wake_enabled"])
+        self.assertEqual(data["error_code"], "unavailable")
+        self.assertEqual(FakeVps.wake_calls, 0)
+
+    def test_vps_wake_rate_limit(self):
+        token, _ = self.login()
+        FakeVps.wake_code = 429
+        FakeVps.wake_payload = {"code": "retry_after", "message": "aguarde"}
+        status, data = http("POST", f"{self.public_url}/api/v1/vps/wake", {}, token=token)
+        self.assertEqual(status, 429)
+        self.assertEqual(data["code"], "rate_limited")
+
+    def test_vps_wake_sem_capacidade_oracle(self):
+        token, _ = self.login()
+        FakeVps.wake_code = 409
+        FakeVps.wake_payload = {
+            "code": "capacity_unavailable",
+            "message": "sem capacidade",
+        }
+        status, data = http("POST", f"{self.public_url}/api/v1/vps/wake", {}, token=token)
+        self.assertEqual(status, 503, data)
+        self.assertEqual(data["code"], "capacity_unavailable")
+
+    def test_vps_wake_desativado(self):
+        token, _ = self.login()
+        FakeVps.wake_payload = {
+            "state": "stopped",
+            "jellyfin_online": False,
+            "wake_enabled": False,
+            "retry_after_seconds": 30,
+            "poll_after_seconds": 15,
+            "result": "disabled",
+        }
+        status, data = http("POST", f"{self.public_url}/api/v1/vps/wake", {}, token=token)
+        self.assertEqual(status, 409, data)
+        self.assertEqual(data["code"], "wake_disabled")
+
+    def test_vps_cooldown_entre_wakes(self):
+        token, _ = self.login()
+        primeiro = http("POST", f"{self.public_url}/api/v1/vps/wake", {}, token=token)
+        self.assertEqual(primeiro[0], 200, primeiro[1])
+        segundo = http("POST", f"{self.public_url}/api/v1/vps/wake", {}, token=token)
+        self.assertEqual(segundo[0], 429, segundo[1])
+        self.assertEqual(FakeVps.wake_calls, 1, "wake simultâneo deve ser bloqueado")
 
     def test_subs_queue(self):
         token, _ = self.login()
@@ -1186,6 +1413,162 @@ class BffTest(unittest.TestCase):
             "POST", f"{self.public_url}/api/v1/requests/retry", {"key": "x"}
         )
         self.assertEqual(status, 401)
+
+    # ---- sincronização automática de legendas ---------------------------
+
+    def _wait_sync(self, token, job_id, timeout=5.0):
+        deadline = time.time() + timeout
+        data = None
+        while time.time() < deadline:
+            status, data = http(
+                "GET", f"{self.public_url}/api/v1/subs/sync/{job_id}", token=token
+            )
+            self.assertEqual(status, 200, data)
+            if data["status"] in ("done", "error"):
+                return data
+            time.sleep(0.05)
+        self.fail(f"sync não terminou: {data}")
+
+    def test_subs_sync_route_exige_auth(self):
+        status, _ = http(
+            "POST", f"{self.public_url}/api/v1/subs/sync",
+            {"item_id": "x", "subtitle_index": 0},
+        )
+        self.assertEqual(status, 401)
+
+    def test_subs_sync_sem_campos(self):
+        token, _ = self.login()
+        status, data = http(
+            "POST", f"{self.public_url}/api/v1/subs/sync", {}, token=token
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(data["code"], "item_required")
+
+    def test_subs_sync_arquivo_externo(self):
+        token, _ = self.login()
+        tmp = tempfile.mkdtemp(prefix="sync-test-")
+        try:
+            subtitle = os.path.join(tmp, "ep.srt")
+            video = os.path.join(tmp, "ep.mkv")
+            with open(subtitle, "w", encoding="utf-8") as handle:
+                handle.write("1\n00:00:01,000 --> 00:00:02,000\nOlá\n")
+            with open(video, "wb") as handle:
+                handle.write(b"video")
+
+            def fake_resolve(client, api_key, item_id, media_source_id, index, roots):
+                return api_v1.SyncTarget(
+                    video, subtitle, None, "pt-br", "Portuguese", ".srt"
+                )
+
+            def fake_run(video_path, subtitle_path, output_path, timeout, max_offset):
+                with open(output_path, "w", encoding="utf-8") as handle:
+                    handle.write("1\n00:00:02,500 --> 00:00:03,500\nOlá\n")
+                return 1.2, "offset seconds: 1.5"
+
+            with mock.patch("api_v1.load_jellyfin_api_key", return_value="chave"):
+                with mock.patch(
+                    "api_v1.resolve_sync_targets", side_effect=fake_resolve
+                ):
+                    with mock.patch("api_v1.run_ffsubsync", side_effect=fake_run):
+                        with mock.patch(
+                            "api_v1.refresh_jellyfin_item", return_value=True
+                        ):
+                            status, data = http(
+                                "POST",
+                                f"{self.public_url}/api/v1/subs/sync",
+                                {
+                                    "item_id": "item-sync",
+                                    "media_source_id": "source-1",
+                                    "subtitle_index": 0,
+                                },
+                                token=token,
+                            )
+                            self.assertEqual(status, 202, data)
+                            final = self._wait_sync(token, data["job_id"])
+
+            self.assertEqual(final["status"], "done", final)
+            self.assertEqual(final["offset_ms"], 1500)
+            self.assertIn("sincronizada", final["message"])
+            with open(subtitle, encoding="utf-8") as handle:
+                self.assertIn("00:00:02,500", handle.read())
+            backups = [
+                name for name in os.listdir(tmp)
+                if name.startswith("ep.srt.bak.sync.")
+            ]
+            self.assertEqual(len(backups), 1)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_subs_sync_extrai_legenda_embutida(self):
+        token, _ = self.login()
+        tmp = tempfile.mkdtemp(prefix="sync-embedded-")
+        try:
+            video = os.path.join(tmp, "ep.mkv")
+            with open(video, "wb") as handle:
+                handle.write(b"video")
+
+            def fake_resolve(*args, **kwargs):
+                return api_v1.SyncTarget(
+                    video, None, 7, "por", "Portuguese", ".srt"
+                )
+
+            def fake_extract(video_path, index, output_path):
+                with open(output_path, "w", encoding="utf-8") as handle:
+                    handle.write("1\n00:00:01,000 --> 00:00:02,000\nOlá\n")
+
+            def fake_run(video_path, subtitle_path, output_path, timeout, max_offset):
+                with open(output_path, "w", encoding="utf-8") as handle:
+                    handle.write("1\n00:00:01,000 --> 00:00:02,000\nOlá\n")
+                return 1.0, "offset seconds: 0.0"
+
+            with mock.patch("api_v1.load_jellyfin_api_key", return_value="chave"):
+                with mock.patch(
+                    "api_v1.resolve_sync_targets", side_effect=fake_resolve
+                ):
+                    with mock.patch(
+                        "api_v1.extract_embedded_subtitle", side_effect=fake_extract
+                    ):
+                        with mock.patch(
+                            "api_v1.run_ffsubsync", side_effect=fake_run
+                        ):
+                            with mock.patch(
+                                "api_v1.refresh_jellyfin_item", return_value=True
+                            ):
+                                status, data = http(
+                                    "POST",
+                                    f"{self.public_url}/api/v1/subs/sync",
+                                    {
+                                        "item_id": "item-embedded",
+                                        "media_source_id": "source-1",
+                                        "subtitle_index": 7,
+                                    },
+                                    token=token,
+                                )
+                                self.assertEqual(status, 202, data)
+                                final = self._wait_sync(token, data["job_id"])
+
+            self.assertEqual(final["status"], "done", final)
+            self.assertTrue(final["external_created"])
+            self.assertEqual(final["language"], "por")
+            sidecar = os.path.join(tmp, "ep.por.srt")
+            self.assertTrue(os.path.isfile(sidecar))
+            backups = [
+                name for name in os.listdir(tmp)
+                if ".bak.sync." in name
+            ]
+            self.assertEqual(backups, [])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_subs_sync_status_de_outro_usuario_404(self):
+        job = self.services.subtitle_sync.submit(
+            "u-user", "item-dono", "source-1", 0
+        )
+        outro, _ = self.login(device="dev-admin", token="jf-admin")
+        status, data = http(
+            "GET", f"{self.public_url}/api/v1/subs/sync/{job['id']}", token=outro
+        )
+        self.assertEqual(status, 404, data)
 
 
 class SecretBoxTest(unittest.TestCase):

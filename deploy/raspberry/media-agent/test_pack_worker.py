@@ -220,6 +220,54 @@ class PackJobTests(PackDbCase):
         self.assertEqual(ma.pack_jobs_payload({})["count"], 0)
         self.assertEqual(ma.pack_jobs_payload({"includeIgnored": "1"})["count"], 1)
 
+    def test_recupera_busca_orfa_sem_gastar_tentativa(self):
+        job = self._job(status="searching", attempts=2)
+        with ma._pack_lock:
+            ma._pack_running.pop(job["key"], None)
+        self.assertGreaterEqual(ma._pack_recover_jobs(), 1)
+        updated = ma._pack_job_get(job["key"])
+        self.assertEqual(updated["status"], "queued")
+        self.assertEqual(updated["attempts"], 1)
+        self.assertIsNone(updated["next_attempt_at"])
+
+    def test_nao_recupera_busca_em_andamento(self):
+        job = self._job(status="searching", attempts=1)
+        with ma._pack_lock:
+            ma._pack_running[job["key"]] = object()
+        try:
+            ma._pack_recover_jobs()
+        finally:
+            with ma._pack_lock:
+                ma._pack_running.pop(job["key"], None)
+        self.assertEqual(ma._pack_job_get(job["key"])["status"], "searching")
+
+    def test_dry_run_antigo_volta_para_fila_quando_desliga(self):
+        job = self._job(
+            status="pack_found", attempts=1, meta={"title": "HDM", "dryRun": True},
+        )
+        old = ma.PACK_WORKER_DRY_RUN
+        ma.PACK_WORKER_DRY_RUN = False
+        try:
+            ma._pack_recover_jobs()
+        finally:
+            ma.PACK_WORKER_DRY_RUN = old
+        updated = ma._pack_job_get(job["key"])
+        self.assertEqual(updated["status"], "queued")
+        self.assertEqual(updated["attempts"], 0)
+        self.assertFalse(updated["meta"].get("dryRun"))
+
+    def test_dry_run_nao_mexe_quando_ligado(self):
+        job = self._job(
+            status="pack_found", attempts=1, meta={"title": "HDM", "dryRun": True},
+        )
+        old = ma.PACK_WORKER_DRY_RUN
+        ma.PACK_WORKER_DRY_RUN = True
+        try:
+            ma._pack_recover_jobs()
+        finally:
+            ma.PACK_WORKER_DRY_RUN = old
+        self.assertEqual(ma._pack_job_get(job["key"])["status"], "pack_found")
+
 
 class PackNotificationTests(PackDbCase):
     def test_dedupe_enquanto_nao_lido(self):
@@ -311,6 +359,26 @@ class PackJobEnsureTests(PackDbCase):
         second = ma.pack_job_ensure({"tvdbId": 360295, "season": 1})
         self.assertFalse(second["created"])
         self.assertEqual(second["job"]["key"], "tvdb:360295:s1")
+
+    def test_ensure_grava_series_id_pelo_tvdb(self):
+        original = ma._pack_series_by_tvdb
+        ma._pack_series_by_tvdb = lambda tvdb_id, refresh=False: {"id": 11, "title": "HDM"}
+        try:
+            result = ma.pack_job_ensure({"tvdbId": 360295, "season": 1})
+        finally:
+            ma._pack_series_by_tvdb = original
+        self.assertEqual(result["job"]["seriesId"], 11)
+
+    def test_resolve_grava_series_id_do_job(self):
+        job = self._job("tvdb:360295:s1", tvdb_id=360295, series_id=None)
+        original = ma._pack_series_by_tvdb
+        ma._pack_series_by_tvdb = lambda tvdb_id, refresh=False: {"id": 11}
+        try:
+            series, updated = ma._pack_resolve_series(job)
+        finally:
+            ma._pack_series_by_tvdb = original
+        self.assertEqual(series["id"], 11)
+        self.assertEqual(updated["series_id"], 11)
 
 
 if __name__ == "__main__":

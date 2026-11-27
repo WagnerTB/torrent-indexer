@@ -332,6 +332,8 @@ services:
       SONARR_ANIME_LEGENDADO_PROFILE: "8"
       SONARR_ANIME_DUBBED_PROFILE: "10"
       STATE_DIR: /state
+      PACK_WORKER_ENABLED: "1"
+      PACK_WORKER_DRY_RUN: "0"
       OS_API_KEY: ${OS_API_KEY:-}
       STORAGE_CONFIG: '[{"id":"media","label":"Mídia 2TB","kind":"SSD","parts":[{"label":"Mídia","path":"/media"}]},{"id":"downloads","label":"Downloads 640GB","kind":"SSD","parts":[{"label":"Downloads","path":"/media/downloads"}]},{"id":"ssd01","label":"SSD 01","kind":"SSD","parts":[{"label":"Mídia","path":"/host/pimedia-probe"},{"label":"Docker","path":"/"}]},{"id":"system","label":"Sistema","kind":"microSD","parts":[{"label":"Sistema","path":"/host/root-probe"}]}]'
     volumes:
@@ -377,11 +379,24 @@ services:
       PROWLARR_URL: http://${LAN_IP}:9696
       QBITTORRENT_URL: http://${LAN_IP}:8082
       GAMING_URL: http://${LAN_IP}:8100
+      VPS_CONTROLLER_URL: ${VPS_CONTROLLER_URL:-https://controle.wtbsrv.com.br}
+      CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-}
+      CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-}
+      VPS_CONTROLLER_READ_TOKEN: ${VPS_CONTROLLER_READ_TOKEN:-}
+      VPS_CONTROLLER_WAKE_TOKEN: ${VPS_CONTROLLER_WAKE_TOKEN:-}
       ALLOWED_NETWORKS: ${ALLOWED_NETWORKS:?set ALLOWED_NETWORKS in .env}
       V1_TOKEN_TTL: "3600"
       V1_LOG_LEVEL: INFO
+      JELLYFIN_API_KEY_FILE: /seerr/settings.json
+      SUBS_SYNC_ENABLED: "1"
+      SUBS_SYNC_TIMEOUT: "900"
+      SUBS_SYNC_MAX_OFFSET: "300"
+      SUBS_SYNC_ROOTS: /media
     volumes:
       - ${CONFIG_ROOT}/media-agent:/app:ro
+      - ${CONFIG_ROOT}/seerr:/seerr:ro
+      - ${MEDIA_ROOT}:/media:rw
+      - ${DOWNLOAD_ROOT}:/media/downloads:rw
       - media-bff-state:/state
     command:
       - python3
@@ -406,7 +421,7 @@ services:
       start_period: 30s
     labels:
       - autoheal=true
-    mem_limit: 96m
+    mem_limit: 512m
     logging: *default-logging
 
 

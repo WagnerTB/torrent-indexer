@@ -2762,6 +2762,15 @@ def _pack_series_by_tvdb(tvdb_id, refresh=False):
     return None
 
 
+def _pack_resolve_series(job, refresh=False):
+    """Série do Sonarr e grava `series_id` (o fallback cria o job só com tvdbId)."""
+    series = _pack_series_by_tvdb(job.get("tvdb_id"), refresh=refresh)
+    series_id = _as_int((series or {}).get("id"))
+    if series_id and series_id != _as_int(job.get("series_id")):
+        job = _pack_job_update(job["key"], series_id=series_id) or job
+    return series, job
+
+
 def _pack_set_season_flag(series_id, season, monitored):
     """Atualiza `seasons[].monitored` na série (o Sonarr não faz isso por episódio)."""
     series_id = _as_int(series_id)
@@ -3185,11 +3194,16 @@ def pack_job_ensure(payload):
     job = _pack_job_get(key)
     if job:
         return {"ok": True, "created": False, "job": _pack_job_public(job)}
-    title = str(payload.get("title") or "")
+    series_id = _as_int(payload.get("seriesId"))
+    series = None
+    if not series_id:
+        series = _pack_series_by_tvdb(tvdb_id)
+        series_id = _as_int((series or {}).get("id"))
+    title = str(payload.get("title") or (series or {}).get("title") or "")
     job = _pack_job_upsert({
         "key": key,
         "tvdb_id": tvdb_id,
-        "series_id": _as_int(payload.get("seriesId")),
+        "series_id": series_id,
         "season": season,
         "profile_id": _as_int(payload.get("profileId")),
         "profile_name": "",
@@ -3549,7 +3563,7 @@ def _pack_search_job(key):
     if not job or job.get("status") != "searching":
         return
     try:
-        series = _pack_series_by_tvdb(job["tvdb_id"], refresh=True)
+        series, job = _pack_resolve_series(job, refresh=True)
         if not series:
             return _pack_fail(job, "Série não encontrada no Sonarr")
         episodes = _pack_series_episodes(series.get("id"), refresh=True)
@@ -3646,6 +3660,42 @@ def _pack_start_searches():
     return started
 
 
+def _pack_recover_jobs():
+    """Destrava jobs deixados em estado transitório.
+
+    - `searching` sem future vivo (restart do agente ou exceção fora do try):
+      volta para a fila sem consumir tentativa.
+    - `pack_found` de um dry-run antigo com o worker já gravando de verdade:
+      volta para a fila (o dry-run nunca baixou nada).
+    """
+    changed = 0
+    with _pack_lock:
+        running = set(_pack_running.keys())
+    for row in _db_rows("SELECT * FROM pack_jobs WHERE status = 'searching'"):
+        job = _pack_job_from_row(row)
+        if job["key"] in running:
+            continue
+        attempts = max(0, (_as_int(job.get("attempts")) or 0) - 1)
+        _pack_job_update(
+            job["key"], status="queued", attempts=attempts,
+            next_attempt_at=None, last_checked_at=_now_iso(),
+            error="busca interrompida; voltou para a fila",
+        )
+        changed += 1
+    if not PACK_WORKER_DRY_RUN:
+        for row in _db_rows("SELECT * FROM pack_jobs WHERE status = 'pack_found'"):
+            job = _pack_job_from_row(row)
+            if not (job.get("meta") or {}).get("dryRun"):
+                continue
+            _pack_job_update(
+                job["key"], status="queued", attempts=0,
+                next_attempt_at=None, last_checked_at=_now_iso(), error="",
+                meta_patch={"dryRun": False, "grabbedAt": None, "progress": None},
+            )
+            changed += 1
+    return changed
+
+
 def pack_worker_tick():
     if not PACK_WORKER_ENABLED:
         return {"ok": True, "enabled": False}
@@ -3653,6 +3703,7 @@ def pack_worker_tick():
     _pack_snapshot_once()
     discovered = _pack_discover()
     _pack_reap_futures()
+    recovered = _pack_recover_jobs()
     waiting = _pack_refresh_waiting()
     tracked = _pack_track_active()
     searching = _pack_start_searches()
@@ -3662,6 +3713,7 @@ def pack_worker_tick():
         "ok": True,
         "enabled": True,
         "discovered": discovered,
+        "recovered": recovered,
         "activated": waiting,
         "tracked": tracked,
         "started": searching,
@@ -3999,6 +4051,10 @@ def pack_accept_single(payload):
         job = _pack_job_get(key)
         if not job:
             return {"ok": False, "error": "job não encontrado"}
+        if not _as_int(job.get("series_id")):
+            series, job = _pack_resolve_series(job, refresh=True)
+            if not series:
+                return {"ok": False, "error": "Série não encontrada no Sonarr"}
         episodes = _pack_series_episodes(job["series_id"], refresh=True)
         stats = pack_episode_stats(episodes, job["season"])
         aired = [
